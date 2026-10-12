@@ -1,0 +1,60 @@
+
+━━ 1. Set up the mesh ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  domain executive   key d29e6fe3b36e8b0c  certified by mesh authority
+  domain finance     key 6137ad0b31918358  certified by mesh authority
+  domain hr          key 9175c9ecb028ac1f  certified by mesh authority
+  domain marketing   key df31756c85814dfd  certified by mesh authority
+  domain operations  key ece66a0720b6aee7  certified by mesh authority
+
+━━ 2. Finance publishes; other departments derive reports ━━━━━━━━━━━━━━━━━━
+  finance.transactions@1   42 chunks  root 2568d3aa681b…  signed by finance
+  hr.headcount@1    1 chunks  root 92679fa5675f…  signed by hr
+  operations.vendor-spend@1    1 chunks  root 40bbaa53fc2d…  signed by operations ← finance.transactions@1  [aggregate for 'spend-analysis']
+  operations.department-spend@1    1 chunks  root 50de2a695cf3…  signed by operations ← finance.transactions@1  [aggregate for 'financial-reporting']
+  executive.department-costs@1    1 chunks  root fc49bf40182c…  signed by executive ← operations.department-spend@1 + hr.headcount@1  [join for 'financial-reporting']
+  executive.cost-per-head@1    1 chunks  root d9564f53f7f3…  signed by executive ← executive.department-costs@1  [compute for 'financial-reporting']
+
+━━ 3. Contracts are enforced ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  marketing tried to use finance.transactions for 'ad-targeting':
+  DENIED  purpose 'ad-targeting' is not permitted by the contract of 'finance.transactions' (permitted: audit, financial-reporting, spend-analysis)
+
+━━ 4. Baseline: verify everything ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VERIFIED finance.transactions@1
+  VERIFIED hr.headcount@1
+  VERIFIED operations.vendor-spend@1
+  VERIFIED operations.department-spend@1
+  VERIFIED executive.department-costs@1
+  VERIFIED executive.cost-per-head@1
+  audit log: 19 hash-chained, signed entries intact
+
+━━ 5. An insider secretly edits the source data in storage ━━━━━━━━━━━━━━━━━
+  TX-001337 amount changed 15534.20 → 95534.20 inside chunk object cdc7a9f4f414… (same size, timestamps restored)
+
+━━ 6. Ask ProofMesh to verify finance.transactions ━━━━━━━━━━━━━━━━━━━━━━━━━
+  TAMPERED finance.transactions@1
+  signed Merkle root     2568d3aa681b522f1a53cada2f70fa00062de4262658bd0286ba2b094034113f
+  recomputed Merkle root 1b37db1ed37f3dd9395c950d6069cb30ad48ebda83e080ecde6beb7eba7be3f0
+  ✗ chunk #17 modified: bytes 84550–91280, CSV lines 1244–1343
+  located by descending the Merkle tree: 13 subtree comparisons for 42 chunks
+  manifest signature still valid → Finance really published the original; the stored bytes changed
+
+━━ 7. Blast radius: every downstream product derived from the tampered data 
+  ⚠ operations.department-spend@1 (owner: operations)  via finance.transactions@1 → operations.department-spend@1
+  ⚠ operations.vendor-spend@1 (owner: operations)  via finance.transactions@1 → operations.vendor-spend@1
+  ⚠ executive.department-costs@1 (owner: executive)  via finance.transactions@1 → operations.department-spend@1 → executive.department-costs@1
+  ⚠ executive.cost-per-head@1 (owner: executive)  via finance.transactions@1 → operations.department-spend@1 → executive.department-costs@1 → executive.cost-per-head@1
+  ✓ hr.headcount@1 unaffected
+
+━━ 8. Consumers verifying the board report see the problem too ━━━━━━━━━━━━━
+  TAINTED  executive.cost-per-head: content intact, but derived from compromised data: finance.transactions@1
+    compromised ancestor: finance.transactions@1 → operations.department-spend@1 → executive.department-costs@1 (TAMPERED)
+  BLOCKED reading it: executive.cost-per-head@1 is TAINTED: content intact, but derived from compromised data: finance.transactions@1
+  BLOCKED new derivation: refusing to derive from finance.transactions@1: TAMPERED (content integrity: recomputed Merkle root 1b37db1ed37f3dd9… ≠ signed root 2568d3aa681b522f…; 1 of 42 chunks altered: chunk #17 (bytes 84550–91280, lines 1244–1343) modified; located with 13 subtree comparisons)
+
+━━ 9. The insider rewrites the manifest to match the edited bytes ━━━━━━━━━━
+  INVALID  finance.transactions: record integrity: manifest content hashes to e18343dddfa0ddd8…, not its id 74f8f4c601fa6344…: the record was edited; manifest signature: signature does not match the manifest content
+  downstream still flagged: operations.department-spend, operations.vendor-spend, executive.department-costs, executive.cost-per-head
+
+━━ Result ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VERIFIED: 1, TAINTED: 4, TAMPERED: 0, INVALID: 1
+  node directory: proofmesh-demo
