@@ -117,7 +117,7 @@ Organisations run on datasets that one team publishes and others build on. Finan
 
 ```mermaid
 flowchart LR
-    subgraph D["🏢 Domains (each holds its own Ed25519 key)"]
+    subgraph D["🏢 Domains, each with its own key"]
         FIN["Finance"]
         OPS["Operations"]
         EXE["Executive"]
@@ -237,17 +237,17 @@ sequenceDiagram
     actor A as 🛡️ Auditor (pinned anchor)
 
     F->>PM: publish q3-transactions.csv
-    PM->>PM: contract check · FastCDC · Merkle root · sign · log entry #14
+    PM->>PM: contract check · FastCDC · Merkle root · sign · log entry 14
     O->>PM: derive department-spend (aggregate, financial-reporting)
     PM->>PM: verify inputs first · check purpose · pin input root · sign output
-    I-->>PM: edit TX-001337 inside chunk #17 (keeps size and timestamps)
+    I-->>PM: edit TX-001337 inside chunk 17 (keeps size and timestamps)
     A->>PM: verify executive.cost-per-head
     PM-->>A: TAINTED: built on finance.transactions@1, which is TAMPERED
     A->>PM: verify finance.transactions
-    PM-->>A: TAMPERED: chunk #17, lines 1244–1343, found in 13 comparisons
+    PM-->>A: TAMPERED: chunk 17, lines 1244–1343, found in 13 comparisons
     I-->>PM: rewrite the manifest to match
     A->>PM: verify again
-    PM-->>A: INVALID: manifest id, Finance's signature and log entry #14 all disagree
+    PM-->>A: INVALID: manifest id, Finance's signature and log entry 14 all disagree
 ```
 
 ### Why 13 comparisons
