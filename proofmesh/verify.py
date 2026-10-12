@@ -42,7 +42,16 @@ from . import transforms
 from .canonical import digest, sha256_hex
 from .chunking import ChunkingParams, chunk_hash, iter_chunks
 from .contract import evaluate, purpose_allowed, can_read
-from .crypto import CTX_EVENT, CTX_MANIFEST, CTX_REGISTRATION, check_certificate, verify_signature
+from .crypto import (
+    CTX_CHECKPOINT,
+    CTX_EVENT,
+    CTX_MANIFEST,
+    CTX_REGISTRATION,
+    CTX_REVOCATION,
+    check_certificate,
+    key_id_for,
+    verify_signature,
+)
 from .merkle import MerkleTree, localize_changes
 from .store import MissingChunk
 
@@ -88,6 +97,34 @@ class Verifier:
         self._cache: dict[str, dict] = {}
         self._in_progress: set[str] = set()
         self._children: dict[str, list[str]] | None = None
+        self.trust = mesh.trust_status()
+        self.log = verify_event_log(mesh)
+        self._bad_seqs = set(self.log["bad_seqs"])
+        self._events_by_seq = {e["seq"]: e for e in self.db.events()}
+        self._publish_events: dict[str, dict] = {}
+        self._product_events: dict[str, list[dict]] = {}
+        self._registration_events: dict[str, dict] = {}
+        for e in self._events_by_seq.values():
+            p = e["payload"]
+            if e["kind"] in ("product.published", "product.derived") and "manifest_id" in p:
+                self._publish_events.setdefault(p["manifest_id"], e)
+                self._product_events.setdefault(p.get("product_id", ""), []).append(e)
+            elif e["kind"] == "product.registered":
+                self._registration_events.setdefault(p.get("product_id", ""), e)
+
+    def _revoked_before(self, key_id: str, seq: int | None) -> str | None:
+        """If ``key_id`` was revoked at or before log position ``seq``, explain how."""
+        key = self.db.get_key(key_id)
+        rev = (key or {}).get("revocation")
+        if not rev:
+            return None
+        stmt = rev.get("revocation", {})
+        if not verify_signature(self.mesh.authority_public_key, CTX_REVOCATION, stmt, rev.get("signature", "")):
+            return None  # an unsigned "revocation" row is ignored, not trusted
+        if seq is None or seq > stmt.get("log_seq", 0):
+            return (f"key {key_id} was revoked at audit-log entry #{stmt.get('log_seq')} "
+                    f"({stmt.get('reason')}) and this was recorded after that")
+        return None
 
     # ---------------------------------------------------------------- public
     def verify_product(self, product_id: str, version: int | None = None) -> dict:
@@ -123,6 +160,9 @@ class Verifier:
                       version=product.get("version", row["version"]),
                       owner_domain=product.get("owner_domain"))
 
+        # 0. trust anchor
+        r.check("trust anchor", self.trust["ok"], self.trust["detail"])
+
         # 1. record integrity
         recomputed = digest(body)
         r.check("record integrity",
@@ -144,6 +184,9 @@ class Verifier:
         r.check("manifest signature", sig_ok,
                 f"Ed25519 signature by '{signer.get('domain')}' (key {signer.get('key_id')}) is valid"
                 if sig_ok else "signature does not match the manifest content")
+
+        # 3b. audit-log record, log anchor and key revocation
+        self._check_log_record(r, manifest_id, body, signer)
 
         # 4. ownership & contract
         self._check_registration(r, body, signer)
@@ -185,6 +228,42 @@ class Verifier:
             d["summary"] = "; ".join(f"{c['name']}: {c['detail']}" for c in failed[:3])
         return d
 
+    def _check_log_record(self, r: _Report, manifest_id: str, body: dict, signer: dict) -> None:
+        event = self._publish_events.get(manifest_id)
+        if event is None:
+            r.check("audit log record", False,
+                    "this manifest was never recorded in the audit log: it was inserted behind ProofMesh's back "
+                    "or the log was truncated")
+        else:
+            ok = (event["seq"] not in self._bad_seqs and event["actor"] == signer.get("domain")
+                  and event["payload"].get("merkle_root") == body.get("content", {}).get("merkle_root"))
+            r.check("audit log record", ok,
+                    f"recorded at audit-log entry #{event['seq']} by '{event['actor']}'" if ok else
+                    f"audit-log entry #{event['seq']} for this manifest is damaged or does not match it")
+        anchor = body.get("log_anchor")
+        if anchor is not None:
+            at = self._events_by_seq.get(anchor.get("seq"))
+            ok = (at is not None and at["entry_hash"] == anchor.get("entry_hash")
+                  and (event is None or anchor["seq"] < event["seq"]))
+            r.check("log anchor", ok,
+                    f"signed against audit-log head #{anchor['seq']}, which is intact" if ok else
+                    f"the audit-log entry #{anchor.get('seq')} this manifest was signed against is missing or changed")
+        revoked = self._revoked_before(signer.get("key_id", ""), event["seq"] if event else None)
+        if revoked:
+            r.check("signing key status", False, revoked)
+        else:
+            r.check("signing key status", True, f"key {signer.get('key_id')} was not revoked when it signed this")
+        # Rollback: the log knows a newer version of this product that the registry no longer has.
+        version = body.get("product", {}).get("version") or 0
+        missing = [e for e in self._product_events.get(body.get("product", {}).get("id", ""), [])
+                   if (e["payload"].get("version") or 0) > version
+                   and self.db.get_envelope(e["payload"]["manifest_id"]) is None]
+        if missing:
+            m = missing[0]
+            r.check("rollback protection", False,
+                    f"version {m['payload']['version']} was published at audit-log entry #{m['seq']} but its manifest "
+                    "is gone from the registry: consumers are being served an older version")
+
     def _check_registration(self, r: _Report, body: dict, signer: dict) -> None:
         pid = body.get("product", {}).get("id")
         product = self.db.get_product(pid) if pid else None
@@ -193,12 +272,16 @@ class Verifier:
             return
         reg_env = product["registration"]
         reg = reg_env.get("registration", {})
-        owner = self.db.get_domain(reg.get("owner_domain", ""))
+        key = self.db.get_key(reg_env.get("signer_key_id", ""))
         ok = False
-        if owner is not None:
-            owner_cert_ok, _ = check_certificate(owner["certificate"], self.mesh.authority_public_key)
-            ok = owner_cert_ok and verify_signature(
-                owner["certificate"]["certificate"]["public_key"], CTX_REGISTRATION, reg, reg_env.get("signature", ""))
+        if key is not None and key["certificate"]:
+            owner_cert_ok, _ = check_certificate(key["certificate"], self.mesh.authority_public_key)
+            ok = (owner_cert_ok and key["certificate"]["certificate"]["domain"] == reg.get("owner_domain")
+                  and verify_signature(key["certificate"]["certificate"]["public_key"], CTX_REGISTRATION, reg,
+                                       reg_env.get("signature", "")))
+            reg_event = self._registration_events.get(pid)
+            if ok and self._revoked_before(key["key_id"], reg_event["seq"] if reg_event else None):
+                ok = False
         r.check("product registration", ok and reg.get("product_id") == pid,
                 f"registration of '{pid}' is signed by its owner '{reg.get('owner_domain')}'"
                 if ok else "product registration is not validly signed by its owner")
@@ -436,7 +519,7 @@ class Verifier:
 
 # ------------------------------------------------------------------ helpers
 
-def audit(mesh, *, replay: bool = False, latest_only: bool = False) -> dict:
+def audit(mesh, *, replay: bool = False, latest_only: bool = False, checkpoint: dict | None = None) -> dict:
     """Verify every product version in the mesh and summarise the blast radius."""
     v = Verifier(mesh, replay=replay)
     rows = list(mesh.db.iter_manifest_rows())
@@ -456,39 +539,78 @@ def audit(mesh, *, replay: bool = False, latest_only: bool = False) -> dict:
          "affected_downstream": rep["affected_downstream"]}
         for rep in reports if rep["status"] in ("INVALID", "TAMPERED")
     ]
-    log = verify_event_log(mesh)
+    log = v.log if checkpoint is None else verify_event_log(mesh, checkpoint)
+    erased = [
+        {"product_id": e["payload"].get("product_id"), "version": e["payload"].get("version"),
+         "manifest_id": mid, "log_seq": e["seq"]}
+        for mid, e in v._publish_events.items() if mesh.db.get_envelope(mid) is None
+    ]
     return {
-        "ok": not compromised and counts["TAINTED"] == 0 and log["ok"],
+        "ok": not compromised and counts["TAINTED"] == 0 and log["ok"] and not erased and v.trust["ok"],
         "counts": counts,
         "compromised": compromised,
+        "erased": erased,
+        "trust": v.trust,
         "reports": reports,
         "event_log": log,
     }
 
 
-def verify_event_log(mesh) -> dict:
-    """Check the hash chain and signatures of the append-only audit log."""
+def verify_event_log(mesh, checkpoint: dict | None = None) -> dict:
+    """Check the hash chain, signatures and key status of the append-only audit log.
+
+    With a ``checkpoint`` (see ``ProofMesh.checkpoint``) also prove the log still
+    extends that signed head, which detects truncation and rewritten history.
+    """
     prev = "0" * 64
-    problems = []
+    problems, bad = [], []
     events = mesh.db.events()
+    authority = mesh.authority_public_key
+    keys: dict[str, dict | None] = {}
     for i, ev in enumerate(events, start=1):
-        entry = {k: ev[k] for k in ("seq", "ts", "actor", "kind", "payload", "prev_hash")}
+        entry = {k: ev[k] for k in ("seq", "ts", "actor", "key_id", "kind", "payload", "prev_hash")}
+        before = len(problems)
         if ev["seq"] != i:
             problems.append(f"entry {ev['seq']}: expected sequence number {i} (entries removed or reordered)")
         if ev["prev_hash"] != prev:
             problems.append(f"entry {ev['seq']}: does not link to the previous entry")
         if digest(entry) != ev["entry_hash"]:
             problems.append(f"entry {ev['seq']}: content was modified")
+        if ev["key_id"] not in keys:
+            keys[ev["key_id"]] = mesh.db.get_key(ev["key_id"])
+        key = keys[ev["key_id"]]
+        pk = None
         if ev["actor"] == "authority":
-            pk = mesh.authority_public_key
-        else:
-            d = mesh.db.get_domain(ev["actor"])
-            ok, _ = check_certificate(d["certificate"], mesh.authority_public_key) if d else (False, "")
-            pk = d["certificate"]["certificate"]["public_key"] if ok else None
+            pk = authority if key_id_for(authority) == ev["key_id"] else None
+        elif key is not None and key["owner"] == ev["actor"] and key["certificate"]:
+            if check_certificate(key["certificate"], authority)[0]:
+                pk = key["certificate"]["certificate"]["public_key"]
         if pk is None or not verify_signature(pk, CTX_EVENT, entry, ev["signature"]):
             problems.append(f"entry {ev['seq']}: signature by '{ev['actor']}' is invalid")
+        elif key and key.get("revocation"):
+            stmt = key["revocation"].get("revocation", {})
+            if (verify_signature(authority, CTX_REVOCATION, stmt, key["revocation"].get("signature", ""))
+                    and ev["seq"] > stmt.get("log_seq", 0)):
+                problems.append(f"entry {ev['seq']}: signed with key {ev['key_id']}, revoked at entry #{stmt['log_seq']}")
+        if len(problems) > before:
+            bad.append(ev["seq"])
         prev = ev["entry_hash"]
-    return {"ok": not problems, "entries": len(events), "head": prev, "problems": problems}
+
+    cp_result = None
+    if checkpoint is not None:
+        body = checkpoint.get("checkpoint", {})
+        if not verify_signature(authority, CTX_CHECKPOINT, body, checkpoint.get("signature", "")):
+            cp_result = {"ok": False, "detail": "checkpoint is not signed by the mesh authority"}
+        else:
+            at = next((e for e in events if e["seq"] == body.get("seq")), None)
+            ok = at is not None and at["entry_hash"] == body.get("entry_hash")
+            cp_result = {"ok": ok, "seq": body.get("seq"),
+                         "detail": f"log still contains checkpoint #{body.get('seq')} unchanged" if ok else
+                         f"log no longer contains checkpoint #{body.get('seq')} as signed: it was truncated or rewritten"}
+            if not ok:
+                problems.append(cp_result["detail"])
+    return {"ok": not problems, "entries": len(events), "head": prev, "problems": problems,
+            "bad_seqs": bad, "checkpoint": cp_result}
 
 
 def verify_file(mesh, product_id: str, data: bytes, version: int | None = None) -> dict:
@@ -521,3 +643,83 @@ def verify_file(mesh, product_id: str, data: bytes, version: int | None = None) 
         "unexpected_regions": changed,
         "missing_chunks": removed,
     }
+
+
+def verify_bundle(bundle: dict, authority_public_key: str, data: bytes | None = None) -> dict:
+    """Verify an evidence bundle offline, with nothing but the authority public key.
+
+    Checks every manifest's id, certificate chain, signature, owner-signed
+    registration and contract, and that each derivation's inputs are in the
+    bundle with the Merkle roots they were derived from. With ``data``, also
+    checks that those bytes are exactly the top product's signed content.
+    """
+    envelopes = {e["manifest_id"]: e for e in [bundle["manifest"], *bundle.get("ancestors", [])]}
+    registrations = bundle.get("registrations", {})
+    results: dict[str, dict] = {}
+
+    def check(env: dict) -> dict:
+        mid = env.get("manifest_id", "")
+        if mid in results:
+            return results[mid]
+        body = env.get("manifest", {})
+        problems: list[str] = []
+        status = "VERIFIED"
+        if digest(body) != mid:
+            problems.append("manifest content does not hash to its id")
+        cert_ok, cert_detail = check_certificate(env.get("certificate") or {}, authority_public_key)
+        cert = (env.get("certificate") or {}).get("certificate", {})
+        signer = body.get("signer", {})
+        if not cert_ok:
+            problems.append(cert_detail)
+        elif cert.get("domain") != signer.get("domain") or cert.get("key_id") != signer.get("key_id"):
+            problems.append("certificate does not belong to the declared signer")
+        elif not verify_signature(cert["public_key"], CTX_MANIFEST, body, env.get("signature", "")):
+            problems.append("signature does not match the manifest content")
+        pid = body.get("product", {}).get("id")
+        reg_env = registrations.get(pid)
+        if not reg_env:
+            problems.append(f"bundle has no registration for '{pid}'")
+        else:
+            reg = reg_env.get("registration", {})
+            rc_ok, _ = check_certificate(reg_env.get("certificate") or {}, authority_public_key)
+            rcert = (reg_env.get("certificate") or {}).get("certificate", {})
+            if not (rc_ok and rcert.get("domain") == reg.get("owner_domain") and verify_signature(
+                    rcert.get("public_key", ""), CTX_REGISTRATION, reg, reg_env.get("signature", ""))):
+                problems.append("product registration is not signed by its owner")
+            elif signer.get("domain") not in reg["contract"]["access_policy"]["writers"]:
+                problems.append(f"'{signer.get('domain')}' is not an authorised writer")
+            elif digest(reg["contract"]) != body.get("contract_hash"):
+                problems.append("contract differs from the registered contract")
+        if problems:
+            status = "INVALID"
+        results[mid] = {"product_id": pid, "version": body.get("product", {}).get("version"),
+                        "manifest_id": mid, "status": status, "problems": problems}
+        for ref in (body.get("lineage") or {}).get("inputs") or []:
+            parent = envelopes.get(ref.get("manifest_id"))
+            if parent is None:
+                results[mid]["problems"].append(f"input {ref.get('product_id')}@{ref.get('version')} missing from bundle")
+                results[mid]["status"] = worst(results[mid]["status"], "TAINTED")
+                continue
+            if parent["manifest"]["content"]["merkle_root"] != ref.get("merkle_root"):
+                results[mid]["problems"].append(f"input {ref.get('product_id')} does not match its pinned Merkle root")
+                results[mid]["status"] = worst(results[mid]["status"], "TAINTED")
+            sub = check(parent)
+            if sub["status"] != "VERIFIED":
+                results[mid]["problems"].append(f"input {sub['product_id']}@{sub['version']} is {sub['status']}")
+                results[mid]["status"] = worst(results[mid]["status"], "TAINTED")
+        return results[mid]
+
+    top = check(bundle["manifest"])
+    data_result = None
+    if data is not None:
+        content = bundle["manifest"]["manifest"]["content"]
+        params = ChunkingParams.from_dict(content["chunking"])
+        root = MerkleTree([chunk_hash(c) for _, c in iter_chunks(data, params)]).root
+        data_result = {"matches": root == content["merkle_root"], "expected_root": content["merkle_root"],
+                       "actual_root": root}
+        if not data_result["matches"]:
+            top = {**top, "status": worst(top["status"], "TAMPERED"),
+                   "problems": top["problems"] + ["the supplied data does not match the signed Merkle root"]}
+    return {"status": top["status"], "ok": top["status"] == "VERIFIED", "top": top,
+            "manifests": list(results.values()), "data": data_result,
+            "authority_key_id": key_id_for(authority_public_key)}

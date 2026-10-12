@@ -32,7 +32,7 @@ def _status(s: str) -> str:
 
 
 def _mesh(args) -> ProofMesh:
-    return ProofMesh(args.root)
+    return ProofMesh(args.root, trust_anchor=args.trust_anchor)
 
 
 def _dump(obj) -> None:
@@ -74,12 +74,63 @@ def cmd_init(args):
     params = ChunkingParams(args.chunking, args.min_chunk, args.avg_chunk, args.max_chunk)
     mesh = ProofMesh.init(args.root, chunking=params)
     print(f"Initialised ProofMesh node at {mesh.root}")
-    print(f"Trust anchor (share with verifiers): {mesh.root / 'trust' / 'authority.pub'}")
+    print(f"Trust anchor: {mesh.node_authority_key}")
+    print("  Give it to verifiers out of band and have them pin it with --trust-anchor or PROOFMESH_TRUST_ANCHOR.")
+    print(f"Admin API token written to {mesh.root / 'keys' / 'admin.token'}")
 
 
 def cmd_domain_add(args):
-    d = _mesh(args).register_domain(args.name, args.description)
+    mesh = _mesh(args)
+    d = mesh.register_domain(args.name, args.description)
     print(f"Registered domain '{d['name']}' with key {d['key_id']} (certified by the mesh authority)")
+    print(f"API token for '{d['name']}' (shown once): {mesh.issue_token(d['name'])}")
+
+
+def cmd_domain_rotate(args):
+    d = _mesh(args).rotate_domain_key(args.name)
+    print(f"'{d['name']}' now signs with key {d['key_id']}; earlier signatures stay valid")
+
+
+def cmd_domain_revoke(args):
+    mesh = _mesh(args)
+    k = mesh.revoke_domain_key(args.name, args.reason, args.key_id)
+    print(f"Revoked key {k['key_id']} at audit-log entry #{k['revocation']['revocation']['log_seq']}; "
+          f"'{args.name}' now signs with {mesh.domain(args.name)['key_id']}")
+
+
+def cmd_token_issue(args):
+    print(_mesh(args).issue_token(args.principal))
+
+
+def cmd_checkpoint(args):
+    cp = _mesh(args).checkpoint()
+    text = json.dumps(cp, indent=2)
+    if args.out:
+        Path(args.out).write_text(text)
+        print(f"Wrote checkpoint of audit-log entry #{cp['checkpoint']['seq']} to {args.out}; store it off this node")
+    else:
+        print(text)
+
+
+def cmd_verify_bundle(args):
+    from .verify import verify_bundle
+
+    bundle = json.loads(Path(args.bundle).read_text())
+    key = args.authority_key or os.environ.get("PROOFMESH_TRUST_ANCHOR")
+    if not key or len(key) <= 16:
+        print("error: pass the mesh authority's full public key with --authority-key", file=sys.stderr)
+        return 1
+    res = verify_bundle(bundle, key, Path(args.data).read_bytes() if args.data else None)
+    if args.json:
+        _dump(res)
+    else:
+        for m in res["manifests"]:
+            print(f"{_status(m['status']):<8}  {m['product_id']}@{m['version']}")
+            for p in m["problems"]:
+                print(f"    ✗ {p}")
+        if res["data"]:
+            print(f"data {'matches' if res['data']['matches'] else 'DOES NOT match'} the signed Merkle root")
+    return 0 if res["ok"] else 2
 
 
 def cmd_domain_list(args):
@@ -160,7 +211,8 @@ def cmd_verify_file(args):
 
 def cmd_audit(args):
     mesh = _mesh(args)
-    res = audit(mesh, replay=args.replay, latest_only=args.latest)
+    checkpoint = json.loads(Path(args.checkpoint).read_text()) if args.checkpoint else None
+    res = audit(mesh, replay=args.replay, latest_only=args.latest, checkpoint=checkpoint)
     if args.json:
         _dump(res)
         return 0 if res["ok"] else 2
@@ -172,8 +224,12 @@ def cmd_audit(args):
               f"{len(c['affected_downstream'])} downstream product version(s):")
         for d in c["affected_downstream"]:
             print(f"  - {d['product_id']}@{d['version']} ({d['owner_domain']})")
+    for e in res["erased"]:
+        print(f"\n{_status('INVALID')} {e['product_id']}@{e['version']} was published (audit log #{e['log_seq']}) "
+              "but is missing from the registry")
     log = res["event_log"]
     print(f"\nAudit log: {log['entries']} entries, {'intact' if log['ok'] else 'BROKEN: ' + '; '.join(log['problems'])}")
+    print(f"Trust: {res['trust']['detail']}")
     return 0 if res["ok"] else 2
 
 
@@ -246,12 +302,30 @@ def cmd_demo(args):
              cover=not args.no_cover_tracks)
 
 
+def cmd_lab(args):
+    from . import lab
+
+    if args.list or not args.attack:
+        for a in lab.catalog():
+            print(f"{a['id']:<17} {a['title']:<22} {a['summary']}")
+        return 0
+    snap = lab.run([{"id": a} for a in args.attack])
+    for a in snap["applied"]:
+        print(_color("attack: ", "1;31") + a["effect"])
+        print(_color("caught by: ", "1;32") + a["defence"])
+    for n in snap["graph"]["nodes"]:
+        print(f"  {_status(n['status']) if n['status'] in COLORS else n['status']:<8}  "
+              f"{n['product_id']}@{n['version']}  {n['summary']}")
+    print(f"  audit log: {'intact' if snap['event_log']['ok'] else '; '.join(snap['event_log']['problems'][:3])}")
+    return 0
+
+
 def cmd_serve(args):
     import uvicorn
 
     os.environ["PROOFMESH_ROOT"] = str(args.root)
-    if args.demo:
-        os.environ["PROOFMESH_DEMO"] = "1"
+    if args.lab_only:
+        os.environ["PROOFMESH_MODE"] = "lab"
     uvicorn.run("proofmesh.api:app", host=args.host, port=args.port, log_level="info")
 
 
@@ -261,6 +335,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="proofmesh", description="A cryptographically verifiable data mesh.")
     p.add_argument("--version", action="version", version=f"proofmesh {__version__}")
     p.add_argument("--root", default=None, help="node directory (default $PROOFMESH_ROOT or ./.proofmesh)")
+    p.add_argument("--trust-anchor", default=None,
+                   help="pin the mesh authority (public key or key id); default $PROOFMESH_TRUST_ANCHOR")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("init", help="create a new ProofMesh node")
@@ -276,6 +352,35 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--description", default="")
     s.set_defaults(fn=cmd_domain_add)
     dom.add_parser("list").set_defaults(fn=cmd_domain_list)
+    s = dom.add_parser("rotate", help="issue a domain a new signing key")
+    s.add_argument("name")
+    s.set_defaults(fn=cmd_domain_rotate)
+    s = dom.add_parser("revoke", help="revoke a compromised key (and rotate)")
+    s.add_argument("name")
+    s.add_argument("--reason", required=True)
+    s.add_argument("--key-id")
+    s.set_defaults(fn=cmd_domain_revoke)
+
+    tok = sub.add_parser("token", help="API tokens").add_subparsers(dest="sub", required=True)
+    s = tok.add_parser("issue")
+    s.add_argument("principal", help="a domain name, or 'admin'")
+    s.set_defaults(fn=cmd_token_issue)
+
+    s = sub.add_parser("checkpoint", help="authority-signed audit-log checkpoint to store off the node")
+    s.add_argument("--out")
+    s.set_defaults(fn=cmd_checkpoint)
+
+    s = sub.add_parser("verify-bundle", help="verify an evidence bundle offline")
+    s.add_argument("bundle")
+    s.add_argument("--authority-key", help="the mesh authority public key (or $PROOFMESH_TRUST_ANCHOR)")
+    s.add_argument("--data", help="also check this file is the bundle's top product")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_verify_bundle)
+
+    s = sub.add_parser("lab", help="run attacks against a throwaway copy of the demo mesh")
+    s.add_argument("attack", nargs="*")
+    s.add_argument("--list", action="store_true")
+    s.set_defaults(fn=cmd_lab)
 
     prod = sub.add_parser("product", help="manage data products").add_subparsers(dest="sub", required=True)
     s = prod.add_parser("register")
@@ -325,6 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("audit", help="verify every product version in the mesh")
     s.add_argument("--replay", action="store_true")
     s.add_argument("--latest", action="store_true", help="only the latest version of each product")
+    s.add_argument("--checkpoint", help="checkpoint file the log must still extend")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_audit)
 
@@ -370,7 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve", help="run the REST API and web UI")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
-    s.add_argument("--demo", action="store_true", help="enable demo endpoints (seed scenario, simulate tampering)")
+    s.add_argument("--lab-only", action="store_true", help="serve only the stateless attack lab and UI")
     s.set_defaults(fn=cmd_serve)
     return p
 

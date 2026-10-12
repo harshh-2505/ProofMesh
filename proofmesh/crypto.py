@@ -18,6 +18,7 @@ signature made for one kind of document can never be replayed as another.
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,8 @@ CTX_CERTIFICATE = "proofmesh/domain-certificate/v1"
 CTX_MANIFEST = "proofmesh/manifest/v1"
 CTX_REGISTRATION = "proofmesh/product-registration/v1"
 CTX_EVENT = "proofmesh/event/v1"
+CTX_REVOCATION = "proofmesh/key-revocation/v1"
+CTX_CHECKPOINT = "proofmesh/log-checkpoint/v1"
 
 
 def _b64(data: bytes) -> str:
@@ -70,19 +73,30 @@ class SigningKey:
         return cls(Ed25519PrivateKey.generate())
 
     @classmethod
-    def load(cls, path: Path) -> "SigningKey":
-        key = serialization.load_pem_private_key(Path(path).read_bytes(), password=None)
+    def from_seed(cls, seed: bytes) -> "SigningKey":
+        """Deterministic key from a 32-byte seed. Only for reproducible demos and tests."""
+        return cls(Ed25519PrivateKey.from_private_bytes(hashlib.sha256(seed).digest()))
+
+    @classmethod
+    def load(cls, path: Path, passphrase: bytes | None = None) -> "SigningKey":
+        try:
+            key = serialization.load_pem_private_key(Path(path).read_bytes(), password=passphrase or None)
+        except TypeError as exc:  # encrypted key without passphrase, or the reverse
+            raise ValueError(f"{path}: {exc} (set PROOFMESH_KEY_PASSPHRASE)") from None
         if not isinstance(key, Ed25519PrivateKey):
             raise ValueError(f"{path} is not an Ed25519 private key")
         return cls(key)
 
-    def save(self, path: Path) -> None:
+    def save(self, path: Path, passphrase: bytes | None = None) -> None:
+        """Write the key as PKCS#8 PEM with mode 0600, encrypted when a passphrase is given."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        encryption = (serialization.BestAvailableEncryption(passphrase) if passphrase
+                      else serialization.NoEncryption())
         pem = self._sk.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
+            encryption,
         )
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as fh:

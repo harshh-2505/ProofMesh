@@ -1,78 +1,99 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from proofmesh import api
+from proofmesh import api, demo, lab
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("PROOFMESH_ROOT", str(tmp_path / "node"))
-    monkeypatch.setenv("PROOFMESH_DEMO", "1")
-    api.state.mesh = None
+    monkeypatch.delenv("PROOFMESH_MODE", raising=False)
+    lab.LAB_ROOT = tmp_path / "lab"
+    api.node.mesh = None
     with TestClient(api.app) as c:
         yield c
-    if api.state.mesh:
-        api.state.mesh.close()
-        api.state.mesh = None
+    if api.node.mesh:
+        api.node.mesh.close()
+        api.node.mesh = None
 
 
-def test_ui_and_overview(client):
-    assert "ProofMesh" in client.get("/").text
-    ov = client.get("/api/overview").json()
-    assert ov["demo_mode"] and ov["counts"]["VERIFIED"] == 6
-    g = client.get("/api/lineage").json()
-    assert len(g["nodes"]) == 6 and len(g["edges"]) == 5
+def admin_headers(tmp_path):
+    return {"Authorization": "Bearer " + (tmp_path / "node" / "keys" / "admin.token").read_text().strip()}
 
 
-def test_tamper_flow(client):
-    assert client.get("/api/products/finance.transactions/data").status_code == 200
-    t = client.post("/api/demo/tamper").json()
-    rep = client.get("/api/products/finance.transactions/verify").json()
-    assert rep["status"] == "TAMPERED"
-    assert rep["content"]["tampered_chunks"][0]["index"] == t["chunk_index"]
+def test_ui_and_security_headers(client):
+    r = client.get("/")
+    assert r.status_code == 200 and "ProofMesh" in r.text
+    assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert client.get("/assets/app.js").status_code == 200
+    assert client.get("/assets/../api.py").status_code == 404
+    assert client.get("/api/health").json()["ok"]
+
+
+def test_lab_endpoints(client):
+    cat = client.get("/api/lab/catalog").json()
+    assert len(cat["attacks"]) == 16
+    clean = client.post("/api/lab/run", json={"attacks": []}).json()
+    assert clean["ok"]
+    hit = client.post("/api/lab/run", json={"attacks": [{"id": "edit", "params": {"txn": "TX-000100"}}]}).json()
+    fin = next(n for n in hit["graph"]["nodes"] if n["product_id"] == "finance.transactions")
+    assert fin["status"] == "TAMPERED"
+    rep = hit["reports"][fin["id"]]
     assert len(rep["affected_downstream"]) == 4
-    r = client.get("/api/products/executive.cost-per-head/data")
-    assert r.status_code == 409 and r.json()["report"]["status"] == "TAINTED"
-    ov = client.get("/api/overview").json()
-    assert ov["counts"] == {"VERIFIED": 1, "TAINTED": 4, "TAMPERED": 1, "INVALID": 0}
-    client.post("/api/demo/cover-tracks")
-    assert client.get("/api/products/finance.transactions/verify").json()["status"] == "INVALID"
-    client.post("/api/demo/reset")
-    assert client.get("/api/overview").json()["counts"]["VERIFIED"] == 6
+    assert client.post("/api/lab/run", json={"attacks": [{"id": "nope"}]}).status_code == 400
+
+    csv = client.get("/api/lab/data/finance.transactions")
+    assert csv.status_code == 200 and csv.content.startswith(b"txn_id,")
+    ok = client.post("/api/lab/verify-copy/finance.transactions", content=csv.content).json()
+    assert ok["matches"]
+    bad = client.post("/api/lab/verify-copy/finance.transactions",
+                      content=csv.content.replace(b"USD\n", b"EUR\n", 1)).json()
+    assert not bad["matches"] and bad["changed_lines"]
+
+    assert not client.get("/api/lab/policy", params={"consumer": "marketing", "purpose": "ad-targeting"}).json()["allowed"]
+    b = client.get("/api/lab/bundle/executive.cost-per-head")
+    assert client.post("/api/lab/verify-bundle", content=b.content).json()["ok"]
+    assert client.post("/api/lab/verify-bundle", content=b"{not json").status_code == 400
+    assert client.get("/api/lab/proof/finance.transactions/4").json()["verified"]
+    assert client.post("/api/lab/verify-copy/finance.transactions", content=b"x" * (6 * 1024 * 1024)).status_code == 413
 
 
-def test_register_publish_derive(client):
-    assert client.post("/api/domains", json={"name": "sales"}).status_code == 201
+def test_node_requires_tokens(client, tmp_path):
+    assert client.post("/api/node/domains", json={"name": "sales"}).status_code == 401
+    client.get("/api/node/overview")  # creates the node
+    admin = admin_headers(tmp_path)
+    r = client.post("/api/node/domains", json={"name": "sales"}, headers=admin)
+    assert r.status_code == 201
+    sales = {"Authorization": f"Bearer {r.json()['token']}"}
+    other = {"Authorization": f"Bearer {client.post('/api/node/domains', json={'name': 'audit'}, headers=admin).json()['token']}"}
+    assert client.post("/api/node/domains", json={"name": "x1"}, headers=sales).status_code == 403
+
     contract = {"schema": {"format": "csv", "columns": [{"name": "region", "required": True},
                                                        {"name": "revenue", "type": "decimal"}]},
-                "permitted_purposes": ["financial-reporting"]}
-    assert client.post("/api/products", json={"product_id": "sales.revenue", "owner": "sales",
-                                              "contract": contract}).status_code == 201
-    r = client.post("/api/products/sales.revenue/versions?filename=rev.csv",
-                    content=b"region,revenue\nEMEA,10.5\nAPAC,20\n",
-                    headers={"Content-Type": "application/octet-stream"})
+                "access_policy": {"readers": ["sales"]}, "permitted_purposes": ["financial-reporting"]}
+    assert client.post("/api/node/products", json={"product_id": "sales.revenue", "owner": "sales",
+                                                   "contract": contract}, headers=other).status_code == 403
+    assert client.post("/api/node/products", json={"product_id": "sales.revenue", "owner": "sales",
+                                                   "contract": contract}, headers=sales).status_code == 201
+    body = b"region,revenue\nEMEA,10.5\nAPAC,20\n"
+    assert client.post("/api/node/products/sales.revenue/versions", content=body).status_code == 401
+    assert client.post("/api/node/products/sales.revenue/versions", content=body, headers=other).status_code == 403
+    r = client.post("/api/node/products/sales.revenue/versions?filename=rev.csv", content=body, headers=sales)
     assert r.status_code == 201, r.text
-    assert r.json()["manifest"]["product"]["version"] == 1
-    bad = client.post("/api/products/sales.revenue/versions", content=b"region,revenue\n,x\n")
-    assert bad.status_code == 422
-    client.post("/api/products", json={"product_id": "sales.big", "owner": "sales", "contract": contract})
-    d = client.post("/api/products/sales.big/derive", json={
-        "inputs": ["sales.revenue"], "transform": "filter_rows",
-        "params": {"column": "revenue", "op": "gt", "value": 15}, "purpose": "financial-reporting"})
-    assert d.status_code == 201, d.text
-    data = client.get("/api/products/sales.big/data").content
-    assert data == b"region,revenue\nAPAC,20\n"
-    denied = client.post("/api/products/sales.big/derive", json={
-        "inputs": ["sales.revenue"], "transform": "filter_rows",
-        "params": {"column": "revenue", "op": "gt", "value": 15}, "purpose": "marketing"})
-    assert denied.status_code == 403
-    assert client.get("/api/products/nope.nothing").status_code == 404
-    proof = client.get("/api/products/sales.revenue/proof/0").json()
-    assert proof["verified"]
-    check = client.post("/api/products/sales.revenue/verify-file", content=b"region,revenue\nEMEA,10.5\nAPAC,21\n").json()
-    assert not check["matches"]
+    assert client.post("/api/node/products/sales.revenue/versions", content=b"region,revenue\n,x\n",
+                       headers=sales).status_code == 422
+
+    assert client.get("/api/node/products/sales.revenue/verify").json()["status"] == "VERIFIED"
+    assert client.get("/api/node/products/sales.revenue/data").status_code == 401
+    assert client.get("/api/node/products/sales.revenue/data", headers=other).status_code == 403
+    assert client.get("/api/node/products/sales.revenue/data", headers=sales).content == body
+    assert client.get("/api/node/checkpoint", headers=admin).json()["checkpoint"]["seq"] > 0
+    assert client.post("/api/node/domains/sales/revoke", json={"reason": "test"}, headers=admin).status_code == 200
+    assert client.get("/api/node/products/sales.revenue/verify").json()["status"] == "VERIFIED"
 
 
-def test_demo_endpoints_disabled_without_flag(client, monkeypatch):
-    monkeypatch.delenv("PROOFMESH_DEMO")
-    assert client.post("/api/demo/tamper").status_code == 404
+def test_lab_only_mode(client, monkeypatch):
+    monkeypatch.setenv("PROOFMESH_MODE", "lab")
+    assert client.get("/api/node/overview").status_code == 404
+    assert client.get("/api/lab/catalog").status_code == 200

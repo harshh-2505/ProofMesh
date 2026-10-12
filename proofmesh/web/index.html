@@ -2,294 +2,254 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ProofMesh</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%224%22 fill=%22%232f5bd3%22/%3E%3C/svg%3E">
-<style>
-:root {
-  --bg: #f6f7f9; --panel: #ffffff; --ink: #18202b; --muted: #5b6676; --line: #e1e5eb; --soft: #eef1f5;
-  --accent: #2f5bd3;
-  --ok: #1f8a4c; --ok-bg: #e5f5ec;
-  --warn: #a86200; --warn-bg: #fdf1df;
-  --bad: #c23030; --bad-bg: #fbe7e7;
-  --inv: #8a2fb3; --inv-bg: #f3e6fa;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1318; --panel: #171c23; --ink: #e6eaf0; --muted: #98a3b3; --line: #29313b; --soft: #1f262f;
-    --accent: #7b9cff;
-    --ok: #4cc983; --ok-bg: #143323; --warn: #f0ac4b; --warn-bg: #3a2a12;
-    --bad: #ff7272; --bad-bg: #3d1717; --inv: #d38bff; --inv-bg: #301a3d;
-  }
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink);
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; padding: 14px 20px;
-  border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
-h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
-h1 small { font-weight: 400; color: var(--muted); font-size: 13px; margin-left: 8px; }
-h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
-.pills { display: flex; gap: 8px; flex-wrap: wrap; }
-.pill { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.VERIFIED { color: var(--ok); background: var(--ok-bg); }
-.TAINTED { color: var(--warn); background: var(--warn-bg); }
-.TAMPERED { color: var(--bad); background: var(--bad-bg); }
-.INVALID { color: var(--inv); background: var(--inv-bg); }
-.spacer { flex: 1; }
-button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line);
-  background: var(--panel); color: var(--ink); cursor: pointer; }
-button:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.danger { color: var(--bad); }
-main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; padding: 16px 20px; align-items: start; }
-#graph-card { position: sticky; top: 72px; }
-#graph { display: block; width: 100%; height: auto; }
-@media (max-width: 980px) { main { grid-template-columns: 1fr; padding: 16px; } #graph-card { position: static; } header { padding: 12px 16px; } }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
-#graph-wrap { overflow-x: auto; }
-svg text { fill: var(--ink); }
-.node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
-.node { cursor: pointer; }
-.node.sel rect { stroke: var(--accent); stroke-width: 2.5; }
-.node .bar { stroke: none; }
-.node .sub { fill: var(--muted); font-size: 11px; }
-.edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .55; }
-.edge.hot { stroke: var(--bad); opacity: .9; stroke-width: 2; stroke-dasharray: 5 4; }
-.elabel { fill: var(--muted); font-size: 10.5px; }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
-.kv { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 4px 12px; margin: 12px 0; }
-.kv div:nth-child(odd) { color: var(--muted); }
-.mono { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
-.chunks { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0 4px; }
-.chunks span { width: 14px; height: 14px; border-radius: 3px; background: var(--ok-bg); border: 1px solid var(--ok); opacity: .8; }
-.chunks span.bad { background: var(--bad); border-color: var(--bad); opacity: 1; }
-.checks { list-style: none; padding: 0; margin: 8px 0; }
-.checks li { padding: 6px 0; border-top: 1px solid var(--soft); display: grid; grid-template-columns: 20px minmax(0, 1fr); }
-.checks b { font-weight: 600; }
-.checks .d { color: var(--muted); font-size: 13px; }
-.ok-mark { color: var(--ok); } .bad-mark { color: var(--bad); } .warn-mark { color: var(--warn); }
-.impact { border-radius: 10px; padding: 10px 12px; margin: 12px 0; }
-.impact.bad { background: var(--bad-bg); } .impact.warn { background: var(--warn-bg); }
-.impact ul { margin: 6px 0 0; padding-left: 18px; }
-.path { color: var(--muted); font-size: 12px; }
-.status-big { display: inline-block; font-size: 15px; padding: 4px 12px; border-radius: 8px; font-weight: 700; }
-.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-td, th { text-align: left; padding: 6px 8px; border-top: 1px solid var(--soft); vertical-align: top; }
-th { color: var(--muted); font-weight: 500; }
-#log-card { grid-column: 1 / -1; }
-.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg);
-  padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
-.toast.show { opacity: 1; }
-pre { background: var(--soft); padding: 10px; border-radius: 8px; max-height: 360px; overflow: auto; font-size: 11.5px; }
-.empty { color: var(--muted); padding: 24px 0; text-align: center; }
-</style>
+<meta name="description" content="ProofMesh seals every dataset with a signed Merkle tree and a lineage graph. Break it in the attack lab and watch it catch you.">
+<meta name="theme-color" content="#0a0e16">
+<meta property="og:title" content="ProofMesh: tamper-evident data products">
+<meta property="og:description" content="Signed manifests, Merkle trees and lineage for organisational data. Try to tamper with it.">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/assets/app.css">
+<script src="/assets/app.js" defer></script>
 </head>
 <body>
-<header>
-  <h1>ProofMesh<small>verifiable data mesh</small></h1>
-  <div class="pills" id="counts"></div>
-  <div class="spacer"></div>
-  <div class="row" id="demo-controls" hidden>
-    <button id="btn-reset">Reset scenario</button>
-    <button class="danger" id="btn-tamper">Secretly tamper source</button>
-    <button class="danger" id="btn-cover">Forge manifest</button>
-  </div>
-  <button class="primary" id="btn-audit">Verify all</button>
+<a class="skip" href="#lab">Skip to the attack lab</a>
+
+<header class="topbar">
+  <a class="brand" href="#top" aria-label="ProofMesh home">
+    <span class="brand-seal" aria-hidden="true"></span>
+    <span>ProofMesh</span>
+  </a>
+  <nav aria-label="Sections">
+    <a href="#lab">Attack lab</a>
+    <a href="#tools">Verify</a>
+    <a href="#how">How it works</a>
+    <a href="#ledger">Audit log</a>
+    <a href="https://github.com/harshh-2505/ProofMesh" rel="noopener">GitHub</a>
+  </nav>
+  <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch colour theme">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+  </button>
 </header>
-<main>
-  <section class="card" id="graph-card">
-    <h2>Lineage graph</h2>
-    <div id="graph-wrap"><svg id="graph" role="img" aria-label="Lineage graph of data products"></svg></div>
-    <div class="empty" id="graph-empty" hidden>No data products published yet.</div>
-    <div class="legend">
-      <span><i style="background:var(--ok)"></i>verified</span>
-      <span><i style="background:var(--warn)"></i>tainted by upstream</span>
-      <span><i style="background:var(--bad)"></i>tampered</span>
-      <span><i style="background:var(--inv)"></i>invalid / forged</span>
+
+<main id="top">
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Cryptographically verifiable data mesh</p>
+      <h1>Every dataset carries its own <em>proof</em>.</h1>
+      <p class="lede">ProofMesh seals each department's data with Ed25519 signatures and a Merkle tree, and records every transformation in a lineage graph. Change a single byte anywhere and it tells you exactly what changed and which reports inherited it.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#lab">Try to break it</a>
+        <a class="btn" href="https://github.com/harshh-2505/ProofMesh" rel="noopener">Read the code</a>
+      </div>
+      <dl class="hero-facts">
+        <div><dt>Signatures</dt><dd>Ed25519</dd></div>
+        <div><dt>Chunking</dt><dd>FastCDC</dd></div>
+        <div><dt>Tree</dt><dd>RFC 6962</dd></div>
+        <div><dt>Attacks caught</dt><dd id="fact-attacks">16 / 16</dd></div>
+      </dl>
+    </div>
+    <figure class="hero-seal" aria-live="polite">
+      <div class="seal" id="hero-seal" data-state="loading">
+        <div class="seal-foil" aria-hidden="true"></div>
+        <svg class="seal-ring" id="hero-ring" viewBox="0 0 240 240" aria-hidden="true"></svg>
+        <svg class="seal-crack" viewBox="0 0 240 240" aria-hidden="true"><path d="M120 6 L112 58 L131 84 L104 121 L127 151 L109 196 L118 234"/><path d="M104 121 L62 132 L28 118"/><path d="M127 151 L170 166 L211 160"/></svg>
+        <div class="seal-core">
+          <span class="seal-label" id="hero-label">Reading seal…</span>
+          <span class="seal-product">finance.transactions</span>
+          <span class="seal-root mono" id="hero-root">&nbsp;</span>
+        </div>
+      </div>
+      <figcaption id="hero-caption">The ring is the dataset's Merkle root, drawn as a hashprint. Any edit changes it.</figcaption>
+    </figure>
+  </section>
+
+  <section class="lab" id="lab" aria-labelledby="lab-title">
+    <div class="section-head">
+      <p class="eyebrow">Attack lab</p>
+      <h2 id="lab-title">Pick an attack. Run it. Watch it get caught.</h2>
+      <p>Each run copies a fresh mesh where Finance publishes 3,000 transactions, Operations and the Executive office derive four reports, and HR publishes headcount. Your attacks run against that copy, then ProofMesh verifies everything with a pinned trust anchor.</p>
+    </div>
+
+    <div class="lab-grid">
+      <aside class="bench" aria-label="Attack bench">
+        <div class="bench-head">
+          <h3>Attack bench</h3>
+          <span class="bench-count" id="bench-count">0 selected</span>
+        </div>
+        <div class="presets" role="group" aria-label="Scenarios">
+          <button type="button" class="chip" data-preset="edit">The demo story</button>
+          <button type="button" class="chip" data-preset="rewrite-manifest">Cover-up</button>
+          <button type="button" class="chip" data-preset="trust-root">Inside job</button>
+          <button type="button" class="chip" data-preset="stolen-key">Stolen key</button>
+        </div>
+        <ol class="attacks" id="attacks"></ol>
+        <div class="bench-actions">
+          <button type="button" class="btn btn-danger" id="run-btn" disabled>Run attack</button>
+          <button type="button" class="btn" id="reset-btn">Reset</button>
+        </div>
+      </aside>
+
+      <div class="verdict">
+        <div class="verdict-bar" id="verdict-bar" aria-live="polite">
+          <div class="verdict-title" id="verdict-title">Loading the mesh…</div>
+          <div class="pills" id="counts"></div>
+        </div>
+        <ol class="applied" id="applied" hidden></ol>
+        <div class="graph-card">
+          <div class="graph-head">
+            <h3>Lineage graph</h3>
+            <span class="hint">Select a product to inspect it</span>
+          </div>
+          <div class="graph-wrap" id="graph-wrap"><svg id="graph" role="img" aria-label="Lineage graph"></svg><div class="scan" id="scan"></div></div>
+          <ul class="legend">
+            <li><i class="dot VERIFIED"></i>Verified</li>
+            <li><i class="dot TAINTED"></i>Tainted upstream</li>
+            <li><i class="dot TAMPERED"></i>Tampered</li>
+            <li><i class="dot INVALID"></i>Invalid or forged</li>
+            <li><i class="dot ERASED"></i>Erased</li>
+          </ul>
+        </div>
+        <article class="inspector" id="inspector" aria-labelledby="insp-title">
+          <header class="insp-head">
+            <div class="insp-seal" id="insp-seal" aria-hidden="true"></div>
+            <div class="insp-titles">
+              <p class="eyebrow" id="insp-owner">&nbsp;</p>
+              <h3 id="insp-title">Select a product</h3>
+              <p class="insp-summary" id="insp-summary"></p>
+            </div>
+            <span class="status-tag" id="insp-status"></span>
+          </header>
+          <div class="tabs" role="tablist" aria-label="Product details">
+            <button role="tab" type="button" id="tab-merkle" aria-selected="true" aria-controls="panel-merkle">Merkle tree</button>
+            <button role="tab" type="button" id="tab-checks" aria-selected="false" aria-controls="panel-checks">Checks</button>
+            <button role="tab" type="button" id="tab-impact" aria-selected="false" aria-controls="panel-impact">Impact</button>
+            <button role="tab" type="button" id="tab-manifest" aria-selected="false" aria-controls="panel-manifest">Signed manifest</button>
+          </div>
+          <section class="panel" role="tabpanel" id="panel-merkle" aria-labelledby="tab-merkle"></section>
+          <section class="panel" role="tabpanel" id="panel-checks" aria-labelledby="tab-checks" hidden></section>
+          <section class="panel" role="tabpanel" id="panel-impact" aria-labelledby="tab-impact" hidden></section>
+          <section class="panel" role="tabpanel" id="panel-manifest" aria-labelledby="tab-manifest" hidden></section>
+        </article>
+      </div>
+    </div>
+
+  </section>
+
+  <section class="tools" id="tools" aria-labelledby="tools-title">
+    <div class="section-head">
+      <p class="eyebrow">Verify it yourself</p>
+      <h2 id="tools-title">Three things a consumer can check without trusting anyone.</h2>
+    </div>
+    <div class="tool-grid">
+      <article class="tool">
+        <h3>Check a copy you received</h3>
+        <p>Download Finance's ledger, change anything in a spreadsheet or text editor, and drop it back here. ProofMesh re-chunks it and compares it with the signed Merkle root.</p>
+        <div class="tool-row">
+          <a class="btn" href="/api/lab/data/finance.transactions" download>Download ledger CSV</a>
+        </div>
+        <label class="drop" id="copy-drop" for="copy-file">
+          <input type="file" id="copy-file" accept=".csv,text/csv">
+          <span>Drop the CSV here or <u>choose a file</u></span>
+        </label>
+        <div class="tool-out" id="copy-out" aria-live="polite"></div>
+      </article>
+
+      <article class="tool">
+        <h3>Ask the policy engine</h3>
+        <p>Contracts list who may read a product and for which purposes. Purposes are sticky, so nothing derived from Finance data can be offered for a purpose Finance never allowed.</p>
+        <form class="policy-form" id="policy-form">
+          <label for="pol-consumer">Department</label>
+          <select id="pol-consumer">
+            <option value="marketing">Marketing</option>
+            <option value="operations">Operations</option>
+            <option value="executive">Executive office</option>
+            <option value="hr">HR</option>
+          </select>
+          <label for="pol-purpose">Wants to use Finance data for</label>
+          <select id="pol-purpose">
+            <option value="ad-targeting">ad-targeting</option>
+            <option value="spend-analysis">spend-analysis</option>
+            <option value="financial-reporting">financial-reporting</option>
+            <option value="audit">audit</option>
+            <option value="workforce-planning">workforce-planning</option>
+          </select>
+          <button class="btn" type="submit">Ask</button>
+        </form>
+        <div class="tool-out" id="policy-out" aria-live="polite"></div>
+      </article>
+
+      <article class="tool">
+        <h3>Verify offline evidence</h3>
+        <p>An evidence bundle holds a report's signed manifest plus every ancestor's. Anyone with the authority's public key can check the whole chain without access to ProofMesh.</p>
+        <div class="tool-row">
+          <a class="btn" href="/api/lab/bundle/executive.cost-per-head" download="executive.cost-per-head.evidence.json">Download board report bundle</a>
+        </div>
+        <label class="drop" id="bundle-drop" for="bundle-file">
+          <input type="file" id="bundle-file" accept=".json,application/json">
+          <span>Drop the bundle here or <u>choose a file</u></span>
+        </label>
+        <div class="tool-out" id="bundle-out" aria-live="polite"></div>
+      </article>
     </div>
   </section>
-  <section class="card" id="detail"><div class="empty">Select a data product in the graph.</div></section>
-  <section class="card" id="log-card">
-    <h2>Audit log <span id="log-status"></span></h2>
-    <div style="overflow-x:auto"><table id="log"></table></div>
+
+  <section class="how" id="how" aria-labelledby="how-title">
+    <div class="section-head">
+      <p class="eyebrow">How it works</p>
+      <h2 id="how-title">From a published file to a proof anyone can check.</h2>
+    </div>
+    <ol class="pipeline">
+      <li>
+        <span class="step-ico" aria-hidden="true"><svg viewBox="0 0 48 48"><rect x="10" y="6" width="28" height="36" rx="4"/><path d="M16 16h16M16 23h16M16 30h10"/></svg></span>
+        <h3>Publish</h3>
+        <p>A department registers a product with a signed data contract: schema, quality rules, readers and permitted purposes. Data that breaks the contract is refused.</p>
+      </li>
+      <li>
+        <span class="step-ico" aria-hidden="true"><svg viewBox="0 0 48 48"><rect x="5" y="16" width="9" height="16" rx="2"/><rect x="17" y="16" width="14" height="16" rx="2"/><rect x="34" y="16" width="9" height="16" rx="2"/></svg></span>
+        <h3>Chunk</h3>
+        <p>FastCDC splits the file at content-defined boundaries. Each chunk is stored under the SHA-256 of its bytes, so an edit only disturbs the chunks around it.</p>
+      </li>
+      <li>
+        <span class="step-ico" aria-hidden="true"><svg viewBox="0 0 48 48"><circle cx="24" cy="9" r="4"/><circle cx="12" cy="24" r="4"/><circle cx="36" cy="24" r="4"/><circle cx="6" cy="39" r="3"/><circle cx="18" cy="39" r="3"/><circle cx="30" cy="39" r="3"/><circle cx="42" cy="39" r="3"/><path d="M24 13 12 20M24 13l12 7M12 28 6 36M12 28l6 8M36 28l-6 8M36 28l6 8"/></svg></span>
+        <h3>Seal</h3>
+        <p>Chunk hashes form an RFC 6962 Merkle tree. The manifest, holding the root, the contract and the lineage, is signed and anchored in a hash-chained audit log.</p>
+      </li>
+      <li>
+        <span class="step-ico" aria-hidden="true"><svg viewBox="0 0 48 48"><circle cx="10" cy="24" r="5"/><circle cx="38" cy="12" r="5"/><circle cx="38" cy="36" r="5"/><path d="M15 22 33 13M15 26l18 9"/></svg></span>
+        <h3>Derive</h3>
+        <p>Another department transforms verified inputs. The transformation's code hash, parameters and purpose are signed into the output, pinned to each input's Merkle root.</p>
+      </li>
+      <li>
+        <span class="step-ico" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M24 4 40 10v12c0 10-7 18-16 22C15 40 8 32 8 22V10Z"/><path d="m16 24 6 6 11-12"/></svg></span>
+        <h3>Verify</h3>
+        <p>A consumer re-hashes every chunk, checks every signature against a pinned authority, walks the full history and, when something is wrong, lists every product it reached.</p>
+      </li>
+    </ol>
+    <div class="threats">
+      <h3>What each attack runs into</h3>
+      <div class="table-wrap"><table id="threat-table"><thead><tr><th scope="col">Attack</th><th scope="col">Who would try it</th><th scope="col">What catches it</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section class="ledger" id="ledger" aria-labelledby="ledger-title">
+    <div class="section-head">
+      <p class="eyebrow">Audit log</p>
+      <h2 id="ledger-title">A hash chain of everything that happened.</h2>
+      <p id="ledger-status">Each entry is signed by the department that acted and commits to the entry before it.</p>
+    </div>
+    <div class="chain-wrap"><ol class="chain" id="chain"></ol></div>
   </section>
 </main>
-<div class="toast" id="toast"></div>
-<script>
-const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const short = (h, n = 12) => h ? h.slice(0, n) + "…" : "";
-const COLORS = { VERIFIED: "var(--ok)", TAINTED: "var(--warn)", TAMPERED: "var(--bad)", INVALID: "var(--inv)" };
-let graph = { nodes: [], edges: [] };
-let selected = null;
-let lastReport = null;
 
-async function api(path, opts = {}) {
-  const r = await fetch(path, opts);
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.error || r.statusText);
-  return body;
-}
-function toast(msg) {
-  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 3500);
-}
-
-async function refresh() {
-  const [ov, g, log] = await Promise.all([api("/api/overview"), api("/api/lineage"), api("/api/log?limit=60")]);
-  $("#demo-controls").hidden = !ov.demo_mode;
-  $("#counts").innerHTML = Object.entries(ov.counts).map(([k, v]) => `<span class="pill ${k}">${v} ${k.toLowerCase()}</span>`).join("");
-  graph = g;
-  drawGraph();
-  drawLog(log);
-  if (!selected && g.nodes.length) selected = g.nodes[0].id;
-  if (selected) await showDetail(selected);
-}
-
-function layout() {
-  const byId = Object.fromEntries(graph.nodes.map(n => [n.id, n]));
-  const parents = {};
-  graph.edges.forEach(e => (parents[e.target] ||= []).push(e.source));
-  const depth = {};
-  const d = (id, seen = new Set()) => {
-    if (depth[id] !== undefined) return depth[id];
-    if (seen.has(id)) return 0; seen.add(id);
-    depth[id] = Math.max(-1, ...(parents[id] || []).map(p => d(p, seen))) + 1;
-    return depth[id];
-  };
-  graph.nodes.forEach(n => d(n.id));
-  // Pull source products right, next to their first consumer, so edges stay short.
-  const kids = {};
-  graph.edges.forEach(e => (kids[e.source] ||= []).push(e.target));
-  graph.nodes.forEach(n => { if (!parents[n.id] && kids[n.id]) depth[n.id] = Math.max(0, Math.min(...kids[n.id].map(k => depth[k])) - 1); });
-  const cols = {};
-  graph.nodes.forEach(n => (cols[depth[n.id]] ||= []).push(n));
-  const W = 200, H = 58, GX = 56, GY = 22;
-  const pos = {};
-  Object.entries(cols).forEach(([c, ns]) => ns.forEach((n, i) => pos[n.id] = { x: 10 + c * (W + GX), y: 10 + i * (H + GY), w: W, h: H }));
-  const ncols = Object.keys(cols).length, nrows = Math.max(1, ...Object.values(cols).map(v => v.length));
-  return { pos, byId, width: 20 + ncols * W + (ncols - 1) * GX, height: 20 + nrows * H + (nrows - 1) * GY };
-}
-
-function drawGraph() {
-  const svg = $("#graph");
-  $("#graph-empty").hidden = graph.nodes.length > 0;
-  if (!graph.nodes.length) { svg.innerHTML = ""; svg.setAttribute("viewBox", "0 0 0 0"); return; }
-  const { pos, byId, width, height } = layout();
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.style.minWidth = Math.round(width * 0.6) + "px";
-  let s = "";
-  graph.edges.forEach(e => {
-    const a = pos[e.source], b = pos[e.target];
-    const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mx = (x1 + x2) / 2;
-    const hot = ["TAMPERED", "INVALID", "TAINTED"].includes(byId[e.source].status);
-    s += `<path class="edge ${hot ? "hot" : ""}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"><title>${esc(e.transformation)} for ${esc(e.purpose)}</title></path>`;
-  });
-  graph.nodes.forEach(n => {
-    const p = pos[n.id];
-    const label = n.product_id.length > 27 ? n.product_id.slice(0, 26) + "…" : n.product_id;
-    s += `<g class="node ${n.id === selected ? "sel" : ""}" data-id="${n.id}" tabindex="0" role="button" aria-label="${esc(n.product_id)} ${n.status}">
-      <rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="10"></rect>
-      <rect class="bar" x="${p.x}" y="${p.y}" width="6" height="${p.h}" rx="3" style="fill:${COLORS[n.status]}"></rect>
-      <text x="${p.x + 16}" y="${p.y + 23}" font-weight="600" font-size="13">${esc(label)}</text>
-      <text class="sub" x="${p.x + 16}" y="${p.y + 42}">v${n.version} · ${esc(n.owner_domain)} · ${n.status.toLowerCase()}</text>
-    </g>`;
-  });
-  svg.innerHTML = s;
-  svg.querySelectorAll(".node").forEach(g => {
-    const go = () => { selected = g.dataset.id; drawGraph(); showDetail(selected); };
-    g.addEventListener("click", go);
-    g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
-  });
-}
-
-async function showDetail(id, replay = false) {
-  const node = graph.nodes.find(n => n.id === id);
-  if (!node) return;
-  const [rep, env] = await Promise.all([
-    api(`/api/products/${encodeURIComponent(node.product_id)}/verify?version=${node.version}&replay=${replay}`),
-    api(`/api/products/${encodeURIComponent(node.product_id)}/manifest?version=${node.version}`),
-  ]);
-  lastReport = rep;
-  const m = env.manifest, c = m.content, t = m.lineage.transformation;
-  const bad = new Set((rep.content?.tampered_chunks || []).map(p => p.index));
-  const chunks = c.chunks.map(ch => `<span class="${bad.has(ch.index) ? "bad" : ""}" title="chunk #${ch.index} · ${ch.size} B · ${ch.id.slice(0, 16)}…"></span>`).join("");
-  const checks = rep.checks.map(k => {
-    const mark = k.ok ? '<span class="ok-mark">✓</span>' : (k.severity === "critical" ? '<span class="bad-mark">✗</span>' : '<span class="warn-mark">!</span>');
-    return `<li>${mark}<div><b>${esc(k.name)}</b><div class="d">${esc(k.detail)}</div></div></li>`;
-  }).join("");
-  const tampered = (rep.content?.tampered_chunks || []).map(p =>
-    `<li>chunk #${p.index} ${esc(p.problem)}: bytes ${p.offset}–${p.offset + p.size - 1}${p.lines ? `, CSV lines ${p.lines[0]}–${p.lines[1]}` : ""}</li>`).join("");
-  const loc = rep.content?.localization;
-  const down = rep.affected_downstream.map(d => `<li><b>${esc(d.product_id)}@${d.version}</b> <span class="path">owner ${esc(d.owner_domain)} · ${esc(d.path.join(" → "))}</span></li>`).join("");
-  const anc = rep.compromised_ancestors.map(a => `<li><b>${esc(a.product_id)}@${a.version}</b> is ${a.status} <span class="path">via ${esc(a.path.slice().reverse().join(" → "))}</span></li>`).join("");
-  $("#detail").innerHTML = `
-    <div class="row" style="justify-content:space-between">
-      <div><h2 style="margin:0">${esc(m.product.name)}</h2><div class="mono">${esc(m.product.id)}@${m.product.version}</div></div>
-      <span class="status-big ${rep.status}">${rep.status}</span>
-    </div>
-    ${rep.content?.tampered_chunks?.length ? "" : `<p>${esc(rep.summary)}</p>`}
-    ${rep.content?.tampered_chunks?.length ? `<div class="impact bad"><b>Modified data located</b><ul>${tampered}</ul>
-      <div class="path" style="margin-top:6px">Signed root ${short(rep.content.expected_root, 16)} · recomputed ${short(rep.content.actual_root, 16)} · found with ${loc.comparisons} subtree comparisons across ${loc.leaves} chunks</div></div>` : ""}
-    ${down ? `<div class="impact bad"><b>${rep.affected_downstream.length} downstream product version(s) affected</b><ul>${down}</ul></div>` : ""}
-    ${anc ? `<div class="impact warn"><b>Compromised upstream data</b><ul>${anc}</ul></div>` : ""}
-    <div class="kv">
-      <div>Owner</div><div>${esc(m.product.owner_domain)}</div>
-      <div>Signed by</div><div>${esc(m.signer.domain)} <span class="mono">key ${esc(m.signer.key_id)}</span></div>
-      <div>Created</div><div>${esc(m.created_at)}</div>
-      <div>Manifest id</div><div class="mono">${esc(env.manifest_id)}</div>
-      <div>Merkle root</div><div class="mono">${esc(c.merkle_root)}</div>
-      <div>Content</div><div>${esc(c.filename)} · ${c.size.toLocaleString()} bytes · ${c.chunk_count} chunks (${esc(c.chunking.algorithm)})</div>
-      <div>Purposes</div><div>${m.contract.permitted_purposes.map(esc).join(", ")}</div>
-      <div>Readers</div><div>${m.contract.access_policy.readers.map(esc).join(", ")}</div>
-      <div>Classification</div><div>${esc(m.contract.classification)}</div>
-      ${t ? `<div>Transformation</div><div><b>${esc(t.name)}</b> for “${esc(t.purpose)}” by ${esc(t.executed_by)}<div class="mono">code ${short(t.code_hash, 16)} · params ${esc(JSON.stringify(t.params))}</div></div>
-      <div>Inputs</div><div>${m.lineage.inputs.map(i => `${esc(i.product_id)}@${i.version} <span class="mono">${short(i.merkle_root)}</span>`).join("<br>")}</div>` : ""}
-      ${m.quality?.rows != null ? `<div>Quality</div><div>${m.quality.rows.toLocaleString()} rows · ${m.quality.rules.length} rule(s) passed at publish</div>` : ""}
-    </div>
-    <h2>Chunks</h2>
-    <div class="chunks" aria-label="chunk map">${chunks}</div>
-    <div class="row" style="margin:14px 0 6px">
-      <button id="b-verify">Re-verify</button>
-      <button id="b-replay">Verify + replay transformation</button>
-      <a href="/api/products/${encodeURIComponent(m.product.id)}/data?version=${m.product.version}"><button>Download verified data</button></a>
-      <button id="b-json">Signed manifest</button>
-    </div>
-    <h2 style="margin-top:14px">Checks</h2>
-    <ul class="checks">${checks}</ul>
-    <pre id="json" hidden></pre>`;
-  $("#b-verify").onclick = () => showDetail(id).then(() => toast("Verified " + node.product_id));
-  $("#b-replay").onclick = () => showDetail(id, true).then(() => toast("Replayed derivation of " + node.product_id));
-  $("#b-json").onclick = () => { const p = $("#json"); p.hidden = !p.hidden; p.textContent = JSON.stringify(env, null, 2); };
-  $("#detail").querySelector("a").onclick = async (e) => {
-    if (rep.status !== "VERIFIED") { e.preventDefault(); toast(`Download blocked: ${node.product_id} is ${rep.status}`); }
-  };
-}
-
-function drawLog(log) {
-  const v = log.verification;
-  $("#log-status").innerHTML = `<span class="pill ${v.ok ? "VERIFIED" : "TAMPERED"}" style="margin-left:8px;text-transform:none;letter-spacing:0">${v.entries} entries · hash chain ${v.ok ? "intact" : "broken"}</span>`;
-  $("#log").innerHTML = "<tr><th>#</th><th>Time</th><th>Actor</th><th>Event</th><th>Details</th><th>Entry hash</th></tr>" +
-    log.events.slice().reverse().map(e => `<tr><td>${e.seq}</td><td>${esc(e.ts)}</td><td>${esc(e.actor)}</td><td>${esc(e.kind)}</td>
-      <td class="mono">${esc(Object.entries(e.payload).filter(([k]) => !["inputs", "chunking"].includes(k)).map(([k, v]) => `${k}=${typeof v === "string" && v.length > 20 ? v.slice(0, 12) + "…" : JSON.stringify(v)}`).join(" "))}</td>
-      <td class="mono">${short(e.entry_hash)}</td></tr>`).join("");
-}
-
-$("#btn-audit").onclick = () => refresh().then(() => toast("Verified every product version"));
-$("#btn-reset").onclick = async () => { await api("/api/demo/reset", { method: "POST" }); selected = null; await refresh(); toast("Scenario rebuilt: everything verified"); };
-$("#btn-tamper").onclick = async () => {
-  const r = await api("/api/demo/tamper", { method: "POST" });
-  toast(`${r.txn_id} amount silently changed ${r.old_amount} → ${r.new_amount} in storage. Click "Verify all".`);
-};
-$("#btn-cover").onclick = async () => {
-  try { await api("/api/demo/cover-tracks", { method: "POST" }); toast("Manifest rewritten to match the edited bytes. Click \"Verify all\"."); }
-  catch (e) { toast(e.message); }
-};
-refresh().catch(e => { $("#detail").innerHTML = `<div class="empty">${esc(e.message)}</div>`; });
-</script>
+<footer class="foot">
+  <span class="brand-seal small" aria-hidden="true"></span>
+  <p>ProofMesh is open source. The lab runs every attack in a throwaway copy of the mesh, so nothing you do here persists.</p>
+  <a href="https://github.com/harshh-2505/ProofMesh" rel="noopener">github.com/harshh-2505/ProofMesh</a>
+</footer>
+<div class="toast" id="toast" role="status"></div>
 </body>
 </html>

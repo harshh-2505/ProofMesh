@@ -57,10 +57,25 @@ CREATE TABLE IF NOT EXISTS transformations (
     executed_by        TEXT NOT NULL,
     created_at         TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS keys (
+    key_id        TEXT PRIMARY KEY,
+    owner         TEXT NOT NULL,
+    public_key    TEXT NOT NULL,
+    certificate   TEXT,
+    created_at    TEXT NOT NULL,
+    revocation    TEXT
+);
+CREATE INDEX IF NOT EXISTS keys_by_owner ON keys(owner);
+CREATE TABLE IF NOT EXISTS api_tokens (
+    token_hash TEXT PRIMARY KEY,
+    principal  TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events (
     seq        INTEGER PRIMARY KEY,
     ts         TEXT NOT NULL,
     actor      TEXT NOT NULL,
+    key_id     TEXT NOT NULL,
     kind       TEXT NOT NULL,
     payload    TEXT NOT NULL,
     prev_hash  TEXT NOT NULL,
@@ -168,6 +183,20 @@ class Database:
         d = dict(row)
         d["params"] = json.loads(d["params"])
         return d
+
+    # -- keys ----------------------------------------------------------------
+    def get_key(self, key_id: str) -> dict | None:
+        row = self.one("SELECT * FROM keys WHERE key_id = ?", (key_id,))
+        if row is None:
+            return None
+        d = dict(row)
+        d["certificate"] = json.loads(d["certificate"]) if d["certificate"] else None
+        d["revocation"] = json.loads(d["revocation"]) if d["revocation"] else None
+        return d
+
+    def keys_of(self, owner: str) -> list[dict]:
+        return [self.get_key(r["key_id"]) for r in self.all(
+            "SELECT key_id FROM keys WHERE owner = ? ORDER BY rowid", (owner,))]
 
     # -- events --------------------------------------------------------------
     def last_event(self) -> sqlite3.Row | None:

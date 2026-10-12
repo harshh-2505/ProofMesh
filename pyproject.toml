@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proofmesh"
-version = "0.1.0"
+version = "1.0.0"
 description = "A cryptographically verifiable data mesh: signed data products, Merkle-tree integrity, lineage and downstream impact analysis."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["cryptography>=41"]
+dependencies = ["cryptography>=41", "fastapi>=0.110"]
 
 [project.optional-dependencies]
-server = ["fastapi>=0.110", "uvicorn>=0.27"]
-dev = ["pytest>=8", "httpx>=0.27", "fastapi>=0.110", "uvicorn>=0.27"]
+server = ["uvicorn>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27", "uvicorn>=0.27"]
 
 [project.scripts]
 proofmesh = "proofmesh.cli:main"
@@ -22,7 +22,10 @@ proofmesh = "proofmesh.cli:main"
 packages = ["proofmesh"]
 
 [tool.setuptools.package-data]
-proofmesh = ["web/*.html"]
+proofmesh = ["web/*"]
+
+[tool.vercel]
+entrypoint = "app:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

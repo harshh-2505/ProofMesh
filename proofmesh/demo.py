@@ -161,7 +161,8 @@ def build_scenario(mesh: ProofMesh) -> dict:
     return m
 
 
-def secretly_tamper(mesh: ProofMesh, product_id: str = "finance.transactions", txn_id: str = TAMPER_TXN) -> dict:
+def secretly_tamper(mesh: ProofMesh, product_id: str = "finance.transactions", txn_id: str = TAMPER_TXN,
+                    new_amount: str | None = None) -> dict:
     """Insider attack: edit one transaction's amount directly in the chunk store.
 
     Bypasses ProofMesh completely, keeps the file size identical and restores
@@ -179,7 +180,7 @@ def secretly_tamper(mesh: ProofMesh, product_id: str = "finance.transactions", t
         line = blob[pos + 1:line_end].decode()
         fields = line.split(",")
         old = fields[5]
-        new = ("9" + old[1:]) if old[0] != "9" else ("1" + old[1:])  # same length, still a valid amount
+        new = new_amount or (("9" + old[1:]) if old[0] != "9" else ("1" + old[1:]))  # same length by default
         fields[5] = new
         new_blob = blob[:pos + 1] + ",".join(fields).encode() + blob[line_end:]
         st = path.stat()
@@ -246,7 +247,8 @@ def run(root: Path | str, *, write: Callable[[str], None] = print, color: bool =
         t = body["lineage"]["transformation"]
         src = (" ← " + " + ".join(f"{i['product_id']}@{i['version']}" for i in body["lineage"]["inputs"])
                + f"  [{t['name']} for '{t['purpose']}']") if t else ""
-        o.write(f"  {pid}@{body['product']['version']}  {body['content']['chunk_count']:>3} chunks  "
+        label = f"{pid}@{body['product']['version']}"
+        o.write(f"  {label:<31} {body['content']['chunk_count']:>2} chunks  "
                 f"root {body['content']['merkle_root'][:12]}…  signed by {body['signer']['domain']}{src}")
 
     o.h("3. Contracts are enforced")

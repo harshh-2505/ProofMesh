@@ -212,6 +212,12 @@ def evaluate(data: bytes, contract: dict) -> dict:
             return report
         report["rows"] = len(rows)
         problems = []
+        dupes = sorted({c for c in header if header.count(c) > 1})
+        if dupes:
+            problems.append(f"duplicate columns: {', '.join(dupes)}")
+        ragged = [i for i, r in enumerate(rows, 1) if None in r or any(v is None for v in r.values())]
+        if ragged:
+            problems.append(f"{len(ragged)} row(s) have the wrong number of fields, e.g. rows {ragged[:MAX_EXAMPLES]}")
         declared = [c["name"] for c in schema["columns"]]
         missing = [c for c in declared if c not in header]
         extra = [c for c in header if c not in declared]

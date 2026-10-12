@@ -2,9 +2,9 @@
 
 from .contract import ContractError, PolicyViolation
 from .mesh import IntegrityError, NotFound, ProofMesh, ProofMeshError
-from .verify import Verifier, audit, verify_event_log, verify_file
+from .verify import Verifier, audit, verify_bundle, verify_event_log, verify_file
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "ContractError",
@@ -15,6 +15,7 @@ __all__ = [
     "ProofMeshError",
     "Verifier",
     "audit",
+    "verify_bundle",
     "verify_event_log",
     "verify_file",
 ]

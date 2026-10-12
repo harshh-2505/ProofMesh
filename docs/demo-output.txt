@@ -1,18 +1,18 @@
 
 ━━ 1. Set up the mesh ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  domain executive   key d29e6fe3b36e8b0c  certified by mesh authority
-  domain finance     key 6137ad0b31918358  certified by mesh authority
-  domain hr          key 9175c9ecb028ac1f  certified by mesh authority
-  domain marketing   key df31756c85814dfd  certified by mesh authority
-  domain operations  key ece66a0720b6aee7  certified by mesh authority
+  domain executive   key 4071b270c6209abf  certified by mesh authority
+  domain finance     key f810f6ee15cecb52  certified by mesh authority
+  domain hr          key b15b234e4da99ef8  certified by mesh authority
+  domain marketing   key 6c93454d58cb7911  certified by mesh authority
+  domain operations  key 54a3653d8e7c9e12  certified by mesh authority
 
 ━━ 2. Finance publishes; other departments derive reports ━━━━━━━━━━━━━━━━━━
-  finance.transactions@1   42 chunks  root 2568d3aa681b…  signed by finance
-  hr.headcount@1    1 chunks  root 92679fa5675f…  signed by hr
-  operations.vendor-spend@1    1 chunks  root 40bbaa53fc2d…  signed by operations ← finance.transactions@1  [aggregate for 'spend-analysis']
+  finance.transactions@1          42 chunks  root 2568d3aa681b…  signed by finance
+  hr.headcount@1                   1 chunks  root 92679fa5675f…  signed by hr
+  operations.vendor-spend@1        1 chunks  root 40bbaa53fc2d…  signed by operations ← finance.transactions@1  [aggregate for 'spend-analysis']
   operations.department-spend@1    1 chunks  root 50de2a695cf3…  signed by operations ← finance.transactions@1  [aggregate for 'financial-reporting']
-  executive.department-costs@1    1 chunks  root fc49bf40182c…  signed by executive ← operations.department-spend@1 + hr.headcount@1  [join for 'financial-reporting']
-  executive.cost-per-head@1    1 chunks  root d9564f53f7f3…  signed by executive ← executive.department-costs@1  [compute for 'financial-reporting']
+  executive.department-costs@1     1 chunks  root fc49bf40182c…  signed by executive ← operations.department-spend@1 + hr.headcount@1  [join for 'financial-reporting']
+  executive.cost-per-head@1        1 chunks  root d9564f53f7f3…  signed by executive ← executive.department-costs@1  [compute for 'financial-reporting']
 
 ━━ 3. Contracts are enforced ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   marketing tried to use finance.transactions for 'ad-targeting':
@@ -39,8 +39,8 @@
   manifest signature still valid → Finance really published the original; the stored bytes changed
 
 ━━ 7. Blast radius: every downstream product derived from the tampered data 
-  ⚠ operations.department-spend@1 (owner: operations)  via finance.transactions@1 → operations.department-spend@1
   ⚠ operations.vendor-spend@1 (owner: operations)  via finance.transactions@1 → operations.vendor-spend@1
+  ⚠ operations.department-spend@1 (owner: operations)  via finance.transactions@1 → operations.department-spend@1
   ⚠ executive.department-costs@1 (owner: executive)  via finance.transactions@1 → operations.department-spend@1 → executive.department-costs@1
   ⚠ executive.cost-per-head@1 (owner: executive)  via finance.transactions@1 → operations.department-spend@1 → executive.department-costs@1 → executive.cost-per-head@1
   ✓ hr.headcount@1 unaffected
@@ -52,8 +52,8 @@
   BLOCKED new derivation: refusing to derive from finance.transactions@1: TAMPERED (content integrity: recomputed Merkle root 1b37db1ed37f3dd9… ≠ signed root 2568d3aa681b522f…; 1 of 42 chunks altered: chunk #17 (bytes 84550–91280, lines 1244–1343) modified; located with 13 subtree comparisons)
 
 ━━ 9. The insider rewrites the manifest to match the edited bytes ━━━━━━━━━━
-  INVALID  finance.transactions: record integrity: manifest content hashes to e18343dddfa0ddd8…, not its id 74f8f4c601fa6344…: the record was edited; manifest signature: signature does not match the manifest content
-  downstream still flagged: operations.department-spend, operations.vendor-spend, executive.department-costs, executive.cost-per-head
+  INVALID  finance.transactions: record integrity: manifest content hashes to d7178e8083e8fbff…, not its id bb87d5384a069a46…: the record was edited; manifest signature: signature does not match the manifest content; audit log record: audit-log entry #14 for this manifest is damaged or does not match it
+  downstream still flagged: operations.vendor-spend, operations.department-spend, executive.department-costs, executive.cost-per-head
 
 ━━ Result ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   VERIFIED: 1, TAINTED: 4, TAMPERED: 0, INVALID: 1

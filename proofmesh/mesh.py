@@ -9,15 +9,21 @@ Directory layout of a mesh rooted at ``ROOT``::
     ROOT/keys/authority.pem      authority private key
     ROOT/keys/domains/<d>.pem    each domain's private key
 
-In this MVP one node holds every domain's key, standing in for each
-department's own key store or HSM. Nothing in the verification path depends on
-that: verifiers only need ``trust/authority.pub``.
+In this reference node one machine holds every domain's key, standing in for
+each department's own key store or HSM. Keys are encrypted at rest when
+``PROOFMESH_KEY_PASSPHRASE`` is set. Nothing in the verification path depends
+on the private keys: verifiers need only the authority public key, and should
+*pin* it (``trust_anchor=`` or ``PROOFMESH_TRUST_ANCHOR``) rather than trust the
+copy in ``trust/authority.pub`` that sits next to the data it protects.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+import secrets
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -35,7 +41,16 @@ from .contract import (
     purposes_within,
     summarize_quality,
 )
-from .crypto import CTX_EVENT, CTX_MANIFEST, CTX_REGISTRATION, SigningKey, issue_certificate
+from .crypto import (
+    CTX_CHECKPOINT,
+    CTX_EVENT,
+    CTX_MANIFEST,
+    CTX_REGISTRATION,
+    CTX_REVOCATION,
+    SigningKey,
+    issue_certificate,
+    key_id_for,
+)
 from .db import Database
 from .merkle import MerkleTree
 from .store import ChunkStore
@@ -43,6 +58,16 @@ from .store import ChunkStore
 DOMAIN_RE = re.compile(r"^[a-z][a-z0-9-]{1,39}$")
 PRODUCT_RE = re.compile(r"^[a-z][a-z0-9-]{1,39}\.[a-z0-9][a-z0-9.-]{0,79}$")
 GENESIS = "0" * 64
+FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _passphrase() -> bytes | None:
+    value = os.environ.get("PROOFMESH_KEY_PASSPHRASE")
+    return value.encode() if value else None
+
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 class ProofMeshError(Exception):
@@ -62,7 +87,14 @@ class IntegrityError(ProofMeshError):
 
 
 class ProofMesh:
-    def __init__(self, root: Path | str, clock: Callable[[], str] = utc_now):
+    def __init__(self, root: Path | str, clock: Callable[[], str] = utc_now, *,
+                 trust_anchor: str | None = None, key_seed: bytes | None = None):
+        """Open a node.
+
+        ``trust_anchor`` pins the mesh authority: either its base64 public key or
+        its 16-hex-digit key id. It defaults to ``$PROOFMESH_TRUST_ANCHOR``.
+        Without a pin, verification trusts ``trust/authority.pub`` and says so.
+        """
         self.root = Path(root)
         if not (self.root / "proofmesh.json").exists():
             raise NotFound(f"no ProofMesh node at {self.root} (run `proofmesh init`)")
@@ -70,27 +102,58 @@ class ProofMesh:
         self.chunking = ChunkingParams.from_dict(self.config["chunking"])
         self.db = Database(self.root / "registry.db")
         self.store = ChunkStore(self.root / "objects")
-        self.authority_public_key = (self.root / "trust" / "authority.pub").read_text().strip()
+        self.node_authority_key = (self.root / "trust" / "authority.pub").read_text().strip()
+        self.trust_anchor = trust_anchor or os.environ.get("PROOFMESH_TRUST_ANCHOR") or None
         self.clock = clock
+        self._key_seed = key_seed
+
+    @property
+    def authority_public_key(self) -> str:
+        """The authority key verification uses: the pinned one when a full key is pinned."""
+        if self.trust_anchor and len(self.trust_anchor) > 16:
+            return self.trust_anchor
+        return self.node_authority_key
+
+    def trust_status(self) -> dict:
+        """Whether the node's authority key matches the verifier's pinned trust anchor."""
+        node_id = key_id_for(self.node_authority_key)
+        if not self.trust_anchor:
+            return {"pinned": False, "ok": True, "authority_key_id": node_id,
+                    "detail": f"trusting the node's own authority key {node_id} (not pinned)"}
+        pinned_id = self.trust_anchor if len(self.trust_anchor) <= 16 else key_id_for(self.trust_anchor)
+        ok = pinned_id == node_id
+        return {"pinned": True, "ok": ok, "authority_key_id": node_id, "pinned_key_id": pinned_id,
+                "detail": f"node authority {node_id} matches the pinned trust anchor" if ok else
+                f"node authority {node_id} is NOT the pinned trust anchor {pinned_id}: "
+                "the node's trust root was replaced"}
 
     # ------------------------------------------------------------------ setup
     @classmethod
     def init(cls, root: Path | str, chunking: ChunkingParams | None = None,
-             clock: Callable[[], str] = utc_now) -> "ProofMesh":
+             clock: Callable[[], str] = utc_now, *, key_seed: bytes | None = None) -> "ProofMesh":
+        """Create a node. ``key_seed`` makes every key deterministic (demos and tests only)."""
         root = Path(root)
         if (root / "proofmesh.json").exists():
             raise ProofMeshError(f"{root} already contains a ProofMesh node")
         root.mkdir(parents=True, exist_ok=True)
-        authority = SigningKey.generate()
-        authority.save(root / "keys" / "authority.pem")
+        authority = SigningKey.from_seed(key_seed + b"/authority") if key_seed else SigningKey.generate()
+        authority.save(root / "keys" / "authority.pem", _passphrase())
         (root / "trust").mkdir(exist_ok=True)
         (root / "trust" / "authority.pub").write_text(authority.public_key_b64 + "\n")
         params = chunking or ChunkingParams()
         (root / "proofmesh.json").write_text(json.dumps(
             {"spec_version": 1, "chunking": params.to_dict(), "created_at": clock()}, indent=2) + "\n")
-        mesh = cls(root, clock=clock)
+        mesh = cls(root, clock=clock, key_seed=key_seed)
+        now = clock()
+        mesh.db.execute("INSERT INTO keys (key_id, owner, public_key, certificate, created_at) VALUES (?,?,?,?,?)",
+                        (authority.key_id, "authority", authority.public_key_b64, None, now))
         mesh._log("authority", "mesh.initialized", {
             "authority_key_id": authority.key_id, "chunking": params.to_dict()})
+        admin = mesh.issue_token("admin")
+        token_path = root / "keys" / "admin.token"
+        fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(admin + "\n")
         return mesh
 
     def close(self) -> None:
@@ -104,33 +167,57 @@ class ProofMesh:
 
     # ------------------------------------------------------------------- keys
     def _authority_key(self) -> SigningKey:
-        return SigningKey.load(self.root / "keys" / "authority.pem")
+        return SigningKey.load(self.root / "keys" / "authority.pem", _passphrase())
 
     def _domain_key(self, domain: str) -> SigningKey:
         path = self.root / "keys" / "domains" / f"{domain}.pem"
         if not path.exists():
             raise NotFound(f"no private key for domain '{domain}' on this node")
-        return SigningKey.load(path)
+        return SigningKey.load(path, _passphrase())
+
+    def _new_key(self, label: str) -> SigningKey:
+        if self._key_seed:
+            return SigningKey.from_seed(self._key_seed + b"/" + label.encode())
+        return SigningKey.generate()
+
+    # ----------------------------------------------------------------- tokens
+    def issue_token(self, principal: str) -> str:
+        """Create an API token for a domain (or ``admin``). Only its hash is stored."""
+        if principal != "admin":
+            self.domain(principal)
+        token = f"pm_{principal}_{secrets.token_urlsafe(24)}"
+        self.db.execute("INSERT INTO api_tokens (token_hash, principal, created_at) VALUES (?,?,?)",
+                        (hash_token(token), principal, self.clock()))
+        return token
+
+    def authenticate(self, token: str | None) -> str | None:
+        """Return the principal (domain name or ``admin``) a token belongs to."""
+        if not token:
+            return None
+        row = self.db.one("SELECT principal FROM api_tokens WHERE token_hash = ?", (hash_token(token),))
+        return row["principal"] if row else None
 
     def _key_for(self, actor: str) -> SigningKey:
         return self._authority_key() if actor == "authority" else self._domain_key(actor)
 
     # -------------------------------------------------------------- audit log
-    def _log(self, actor: str, kind: str, payload: dict) -> dict:
+    def _log(self, actor: str, kind: str, payload: dict, *, key: SigningKey | None = None) -> dict:
         last = self.db.last_event()
+        key = key or self._key_for(actor)
         entry = {
             "seq": (last["seq"] + 1) if last else 1,
             "ts": self.clock(),
             "actor": actor,
+            "key_id": key.key_id,
             "kind": kind,
             "payload": payload,
             "prev_hash": last["entry_hash"] if last else GENESIS,
         }
         entry_hash = digest(entry)
-        signature = self._key_for(actor).sign(CTX_EVENT, entry)
+        signature = key.sign(CTX_EVENT, entry)
         self.db.execute(
-            "INSERT INTO events (seq, ts, actor, kind, payload, prev_hash, entry_hash, signature) VALUES (?,?,?,?,?,?,?,?)",
-            (entry["seq"], entry["ts"], actor, kind, json.dumps(payload, sort_keys=True),
+            "INSERT INTO events (seq, ts, actor, key_id, kind, payload, prev_hash, entry_hash, signature) VALUES (?,?,?,?,?,?,?,?,?)",
+            (entry["seq"], entry["ts"], actor, key.key_id, kind, json.dumps(payload, sort_keys=True),
              entry["prev_hash"], entry_hash, signature),
         )
         return {**entry, "entry_hash": entry_hash}
@@ -143,8 +230,8 @@ class ProofMesh:
             raise ProofMeshError("'authority' is reserved")
         if self.db.get_domain(name):
             raise ProofMeshError(f"domain '{name}' already exists")
-        key = SigningKey.generate()
-        key.save(self.root / "keys" / "domains" / f"{name}.pem")
+        key = self._new_key(f"domain/{name}/1")
+        key.save(self.root / "keys" / "domains" / f"{name}.pem", _passphrase())
         now = self.clock()
         cert = issue_certificate(self._authority_key(), name, key.public_key_b64, now)
         with self.db.transaction():
@@ -152,8 +239,64 @@ class ProofMesh:
                 "INSERT INTO domains (name, description, public_key, key_id, certificate, registered_at) VALUES (?,?,?,?,?,?)",
                 (name, description, key.public_key_b64, key.key_id, json.dumps(cert), now),
             )
+            self.db.execute("INSERT INTO keys (key_id, owner, public_key, certificate, created_at) VALUES (?,?,?,?,?)",
+                            (key.key_id, name, key.public_key_b64, json.dumps(cert), now))
             self._log("authority", "domain.registered", {"domain": name, "key_id": key.key_id})
         return self.db.get_domain(name)
+
+    def rotate_domain_key(self, name: str) -> dict:
+        """Issue a domain a fresh key. Signatures made with the old key stay valid."""
+        old = self.domain(name)
+        generation = len(self.db.keys_of(name)) + 1
+        key = self._new_key(f"domain/{name}/{generation}")
+        now = self.clock()
+        cert = issue_certificate(self._authority_key(), name, key.public_key_b64, now)
+        with self.db.transaction():
+            self.db.execute("UPDATE domains SET public_key = ?, key_id = ?, certificate = ? WHERE name = ?",
+                            (key.public_key_b64, key.key_id, json.dumps(cert), name))
+            self.db.execute("INSERT INTO keys (key_id, owner, public_key, certificate, created_at) VALUES (?,?,?,?,?)",
+                            (key.key_id, name, key.public_key_b64, json.dumps(cert), now))
+            self._log("authority", "domain.key_rotated",
+                      {"domain": name, "old_key_id": old["key_id"], "new_key_id": key.key_id})
+        key.save(self.root / "keys" / "domains" / f"{name}.pem", _passphrase())
+        return self.db.get_domain(name)
+
+    def revoke_domain_key(self, name: str, reason: str, key_id: str | None = None) -> dict:
+        """Revoke a (compromised) domain key and rotate to a new one.
+
+        The revocation is an authority-signed statement recorded in the audit
+        log. Anything signed with the key and recorded *after* that log entry is
+        rejected; earlier signatures stay valid. Ordering comes from the
+        hash-chained log, not from timestamps an attacker could backdate.
+        """
+        current = self.domain(name)
+        key_id = key_id or current["key_id"]
+        key = self.db.get_key(key_id)
+        if key is None or key["owner"] != name:
+            raise NotFound(f"domain '{name}' has no key {key_id}")
+        if key["revocation"]:
+            raise ProofMeshError(f"key {key_id} is already revoked")
+        with self.db.transaction():
+            event = self._log("authority", "key.revoked", {"domain": name, "key_id": key_id, "reason": reason})
+            statement = {"type": "proofmesh/key-revocation", "domain": name, "key_id": key_id,
+                         "reason": reason, "log_seq": event["seq"], "revoked_at": event["ts"]}
+            revocation = {"revocation": statement, "signature": self._authority_key().sign(CTX_REVOCATION, statement)}
+            self.db.execute("UPDATE keys SET revocation = ? WHERE key_id = ?", (json.dumps(revocation), key_id))
+        if key_id == current["key_id"]:
+            self.rotate_domain_key(name)
+        return self.db.get_key(key_id)
+
+    def checkpoint(self) -> dict:
+        """An authority-signed statement of the current audit-log head.
+
+        Store it somewhere the node cannot rewrite (a git repo, a ticket, an
+        email). ``verify_event_log(mesh, checkpoint)`` then proves the log still
+        extends it, which catches truncation or a rewritten history.
+        """
+        last = self.db.last_event()
+        body = {"type": "proofmesh/log-checkpoint", "seq": last["seq"], "entry_hash": last["entry_hash"],
+                "authority_key_id": key_id_for(self.node_authority_key), "created_at": self.clock()}
+        return {"checkpoint": body, "signature": self._authority_key().sign(CTX_CHECKPOINT, body)}
 
     def domain(self, name: str) -> dict:
         d = self.db.get_domain(name)
@@ -215,7 +358,8 @@ class ProofMesh:
                             inputs=[], transformation=None)
 
     def _record(self, product: dict, data: bytes, *, actor: str, filename: str | None,
-                media_type: str | None, inputs: list[dict], transformation: dict | None) -> dict:
+                media_type: str | None, inputs: list[dict], transformation: dict | None,
+                key: SigningKey | None = None) -> dict:
         contract = product["contract"]
         quality = evaluate(data, contract)
         if not quality["passed"]:
@@ -229,9 +373,12 @@ class ProofMesh:
 
         prev = self.db.manifest_row(product["product_id"])
         version = (prev["version"] + 1) if prev else 1
-        key = self._domain_key(actor)
+        key = key or self._domain_key(actor)
         signer_domain = self.domain(actor)
         is_csv = contract["schema"]["format"] == "csv"
+        if filename:
+            filename = FILENAME_RE.sub("_", filename).strip("._")[:120] or None
+        head = self.db.last_event()
         body = {
             "type": "proofmesh/manifest",
             "spec_version": 1,
@@ -259,6 +406,9 @@ class ProofMesh:
             "quality": quality,
             "lineage": {"inputs": inputs, "transformation": transformation},
             "signer": {"domain": actor, "key_id": key.key_id},
+            # Commits the manifest to the audit log as it stood: a manifest
+            # cannot later be slipped in "before" an event it never saw.
+            "log_anchor": {"seq": head["seq"], "entry_hash": head["entry_hash"]},
             "created_at": self.clock(),
         }
         manifest_id = digest(body)
@@ -266,9 +416,12 @@ class ProofMesh:
             "manifest_id": manifest_id,
             "manifest": body,
             "signature": key.sign(CTX_MANIFEST, body),
-            "certificate": signer_domain["certificate"],
+            "certificate": (signer_domain["certificate"] if signer_domain["key_id"] == key.key_id
+                            else (self.db.get_key(key.key_id) or {}).get("certificate")),
         }
         with self.db.transaction():
+            if self.db.last_event()["seq"] != head["seq"]:
+                raise ProofMeshError("the audit log moved while publishing; retry")
             self.db.execute(
                 "INSERT INTO manifests (manifest_id, product_id, version, envelope, created_at) VALUES (?,?,?,?,?)",
                 (manifest_id, product["product_id"], version, json.dumps(envelope), body["created_at"]),
@@ -285,7 +438,7 @@ class ProofMesh:
                      transformation.get("code_hash"), json.dumps(transformation["params"], sort_keys=True),
                      transformation["purpose"], transformation["executed_by"], body["created_at"]),
                 )
-            self._log(actor, "product.derived" if inputs else "product.published", {
+            self._log(actor, "product.derived" if inputs else "product.published", key=key, payload={
                 "product_id": product["product_id"],
                 "version": version,
                 "manifest_id": manifest_id,
@@ -449,9 +602,19 @@ class ProofMesh:
                 continue
             ancestors[mid] = anc
             stack.extend(i["manifest_id"] for i in anc["manifest"]["lineage"]["inputs"])
+        products = {env["manifest"]["product"]["id"]} | {a["manifest"]["product"]["id"] for a in ancestors.values()}
+        registrations = {}
+        for pid in sorted(products):
+            p = self.db.get_product(pid)
+            if p is None:
+                continue
+            reg = p["registration"]
+            key = self.db.get_key(reg.get("signer_key_id", ""))
+            registrations[pid] = {**reg, "certificate": key["certificate"] if key else None}
         return {
             "type": "proofmesh/evidence-bundle",
-            "authority_public_key": self.authority_public_key,
+            "authority_key_id": key_id_for(self.node_authority_key),
             "manifest": env,
             "ancestors": list(ancestors.values()),
+            "registrations": registrations,
         }
