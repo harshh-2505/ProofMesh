@@ -396,6 +396,8 @@ main > section { width: min(1200px, 100% - 32px); margin-inline: auto; }
 }
 .pill .dot { width: 8px; height: 8px; }
 .pill.bad { color: var(--tamper); border-color: color-mix(in oklab, var(--tamper) 40%, transparent); background: var(--tamper-bg); }
+.pill.share { cursor: pointer; color: var(--accent); border-style: dashed; font-family: var(--sans); font-weight: 600; }
+.pill.share:hover { border-style: solid; }
 .pill.good { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, transparent); background: var(--ok-bg); }
 
 .applied { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

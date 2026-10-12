@@ -42,6 +42,9 @@ def test_lab_endpoints(client):
     rep = hit["reports"][fin["id"]]
     assert len(rep["affected_downstream"]) == 4
     assert client.post("/api/lab/run", json={"attacks": [{"id": "nope"}]}).status_code == 400
+    link = client.get("/api/lab/run", params={"attacks": "edit,bitflip"}).json()
+    assert [a["id"] for a in link["applied"]] == ["edit", "bitflip"] and not link["ok"]
+    assert client.get("/api/lab/run").json()["ok"]
 
     csv = client.get("/api/lab/data/finance.transactions")
     assert csv.status_code == 200 and csv.content.startswith(b"txn_id,")

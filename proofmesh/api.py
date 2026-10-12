@@ -136,6 +136,12 @@ def lab_run(body: LabRun):
     return lab.run([a.model_dump() for a in body.attacks])
 
 
+@app.get("/api/lab/run")
+def lab_run_link(attacks: str = ""):
+    """Shareable form: ``/api/lab/run?attacks=edit,trust-root`` (default parameters)."""
+    return lab.run([{"id": a.strip()} for a in attacks.split(",") if a.strip()])
+
+
 @app.get("/api/lab/data/{product_id}")
 def lab_data(product_id: str):
     data, content = lab.pristine_data(product_id)

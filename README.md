@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://proofmesh.vercel.app"><img alt="Live attack lab" src="https://img.shields.io/badge/live-attack%20lab-6ef2cf?style=for-the-badge&logo=vercel&logoColor=black"></a>
+  <a href="https://proofmesh-eight.vercel.app"><img alt="Live attack lab" src="https://img.shields.io/badge/live-attack%20lab-6ef2cf?style=for-the-badge&logo=vercel&logoColor=black"></a>
   <img alt="124 tests passing" src="https://img.shields.io/badge/tests-124%20passing-3ee0a1?style=for-the-badge&logo=pytest&logoColor=white">
   <img alt="16 of 16 attacks caught" src="https://img.shields.io/badge/attacks%20caught-16%20%2F%2016-ff5f5f?style=for-the-badge">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-93c5fd?style=for-the-badge&logo=python&logoColor=white">
@@ -16,7 +16,7 @@
 <h3 align="center">Sign every dataset. Hash every chunk. Trace every derivation.<br>Change one byte and ProofMesh names the chunk, the CSV lines, and every report that inherited it.</h3>
 
 <p align="center">
-  <a href="https://proofmesh.vercel.app"><b>Open the live attack lab</b></a> &nbsp;·&nbsp;
+  <a href="https://proofmesh-eight.vercel.app"><b>Open the live attack lab</b></a> &nbsp;·&nbsp;
   <a href="#-quick-start">Quick start</a> &nbsp;·&nbsp;
   <a href="#-the-16-attacks">The 16 attacks</a> &nbsp;·&nbsp;
   <a href="#-how-it-works">How it works</a> &nbsp;·&nbsp;
@@ -274,26 +274,26 @@ flowchart TB
 
 ## 💥 The 16 attacks
 
-Every one of these runs in the [live lab](https://proofmesh.vercel.app), in `proofmesh lab <attack>`, and in [`tests/test_lab.py`](tests/test_lab.py). All 16 are caught.
+Every one of these runs in the [live lab](https://proofmesh-eight.vercel.app) (click a name to run it there), in `proofmesh lab <attack>`, and in [`tests/test_lab.py`](tests/test_lab.py). All 16 are caught. Combine them with `?run=edit,erase-report,tamper-log`.
 
 | | Attack | Who would try it | What they do | Caught by | Verdict |
 |:-:|---|---|---|---|---|
-| ✏️ | **Silent edit** | Insider with storage access | Change one amount directly in the chunk store, keeping size and timestamps | Chunk re-hash and Merkle root | 🟥 `TAMPERED` + 4 `TAINTED` |
-| ⚡ | **One-bit flip** | Disk fault or insider | Flip one bit in a derived executive report | Chunk re-hash | 🟥 `TAMPERED` |
-| 🕳️ | **Missing chunk** | Storage loss or sabotage | Delete one content-addressed chunk | Content check | 🟥 `TAMPERED` |
-| 🧽 | **Cover-up rewrite** | Insider with database access | Edit the data, then rewrite the manifest so its hashes match | Manifest id and Finance's signature | 🟪 `INVALID` |
-| 🪪 | **Rogue certificate** | Attacker with their own CA | Re-sign forged data with a key from the attacker's authority | Certificate chain to the pinned authority | 🟪 `INVALID` |
-| 🗝️ | **Swap the trust root** | Attacker who owns the server | Replace `authority.pub`, re-certify every domain, re-sign forged data | Pinned trust anchor held by the verifier | 🟪 all `INVALID` |
-| 🎭 | **Impersonation** | Another department | Operations re-signs Finance's dataset with its own valid key | Signed registration names Finance as sole writer | 🟪 `INVALID` + 👻 original `ERASED` |
-| 📜 | **Loosen the contract** | Database administrator | Add `ad-targeting` to Finance's permitted purposes | Owner-signed product registration | 🟪 `INVALID` + 4 `TAINTED` |
-| 🙈 | **Hide the lineage** | Insider shrinking the blast radius | Edit the data, delete lineage index rows | Impact analysis reads signed manifests, not the index | 🟥 `TAMPERED` + 4 `TAINTED` |
-| 🧮 | **Forged derivation** | Department publishing bad numbers | Publish altered figures, claiming a verified `aggregate` | Replay of the declared transformation | 🟪 `INVALID` |
-| 🗑️ | **Erase a report** | Insider hiding evidence | Delete the board report from the registry | Hash-chained, signed audit log | 👻 `ERASED` |
-| ⏪ | **Rollback** | Insider serving stale data | Delete Finance's corrected v2 so consumers get v1 | Audit log records every version | 🟪 `INVALID` + 👻 `ERASED` |
-| 📝 | **Rewrite history** | Database administrator | Edit an audit-log entry | Hash chain and per-entry signatures | ⛓️ log broken |
-| ✂️ | **Truncate the log** | Database administrator | Delete the newest log entries | Manifest log records and the authority-signed checkpoint | 🟪 `INVALID`, ⛓️ log broken |
-| 🥷 | **Stolen key** | Thief with a revoked key | Publish v2 of the ledger with Finance's revoked key | Revocation ordered by log sequence, not timestamps | 🟪 `INVALID` |
-| 🚫 | **Policy bypass** | Department ignoring its contract | Marketing publishes an ad-targeting list from Finance data | Purpose re-checked against the signed contract | 🟪 `INVALID` |
+| ✏️ | [**Silent edit**](https://proofmesh-eight.vercel.app/?run=edit) | Insider with storage access | Change one amount directly in the chunk store, keeping size and timestamps | Chunk re-hash and Merkle root | 🟥 `TAMPERED` + 4 `TAINTED` |
+| ⚡ | [**One-bit flip**](https://proofmesh-eight.vercel.app/?run=bitflip) | Disk fault or insider | Flip one bit in a derived executive report | Chunk re-hash | 🟥 `TAMPERED` |
+| 🕳️ | [**Missing chunk**](https://proofmesh-eight.vercel.app/?run=delete-chunk) | Storage loss or sabotage | Delete one content-addressed chunk | Content check | 🟥 `TAMPERED` |
+| 🧽 | [**Cover-up rewrite**](https://proofmesh-eight.vercel.app/?run=rewrite-manifest) | Insider with database access | Edit the data, then rewrite the manifest so its hashes match | Manifest id and Finance's signature | 🟪 `INVALID` |
+| 🪪 | [**Rogue certificate**](https://proofmesh-eight.vercel.app/?run=rogue-ca) | Attacker with their own CA | Re-sign forged data with a key from the attacker's authority | Certificate chain to the pinned authority | 🟪 `INVALID` |
+| 🗝️ | [**Swap the trust root**](https://proofmesh-eight.vercel.app/?run=trust-root) | Attacker who owns the server | Replace `authority.pub`, re-certify every domain, re-sign forged data | Pinned trust anchor held by the verifier | 🟪 all `INVALID` |
+| 🎭 | [**Impersonation**](https://proofmesh-eight.vercel.app/?run=impersonate) | Another department | Operations re-signs Finance's dataset with its own valid key | Signed registration names Finance as sole writer | 🟪 `INVALID` + 👻 original `ERASED` |
+| 📜 | [**Loosen the contract**](https://proofmesh-eight.vercel.app/?run=loosen-contract) | Database administrator | Add `ad-targeting` to Finance's permitted purposes | Owner-signed product registration | 🟪 `INVALID` + 4 `TAINTED` |
+| 🙈 | [**Hide the lineage**](https://proofmesh-eight.vercel.app/?run=hide-lineage) | Insider shrinking the blast radius | Edit the data, delete lineage index rows | Impact analysis reads signed manifests, not the index | 🟥 `TAMPERED` + 4 `TAINTED` |
+| 🧮 | [**Forged derivation**](https://proofmesh-eight.vercel.app/?run=forge-report) | Department publishing bad numbers | Publish altered figures, claiming a verified `aggregate` | Replay of the declared transformation | 🟪 `INVALID` |
+| 🗑️ | [**Erase a report**](https://proofmesh-eight.vercel.app/?run=erase-report) | Insider hiding evidence | Delete the board report from the registry | Hash-chained, signed audit log | 👻 `ERASED` |
+| ⏪ | [**Rollback**](https://proofmesh-eight.vercel.app/?run=rollback) | Insider serving stale data | Delete Finance's corrected v2 so consumers get v1 | Audit log records every version | 🟪 `INVALID` + 👻 `ERASED` |
+| 📝 | [**Rewrite history**](https://proofmesh-eight.vercel.app/?run=tamper-log) | Database administrator | Edit an audit-log entry | Hash chain and per-entry signatures | ⛓️ log broken |
+| ✂️ | [**Truncate the log**](https://proofmesh-eight.vercel.app/?run=truncate-log) | Database administrator | Delete the newest log entries | Manifest log records and the authority-signed checkpoint | 🟪 `INVALID`, ⛓️ log broken |
+| 🥷 | [**Stolen key**](https://proofmesh-eight.vercel.app/?run=stolen-key) | Thief with a revoked key | Publish v2 of the ledger with Finance's revoked key | Revocation ordered by log sequence, not timestamps | 🟪 `INVALID` |
+| 🚫 | [**Policy bypass**](https://proofmesh-eight.vercel.app/?run=policy-bypass) | Department ignoring its contract | Marketing publishes an ad-targeting list from Finance data | Purpose re-checked against the signed contract | 🟪 `INVALID` |
 
 ## 🛡️ Trust model
 
@@ -410,6 +410,7 @@ Global flags: `--root` (or `PROOFMESH_ROOT`), `--trust-anchor` (or `PROOFMESH_TR
 |---|---|---|
 | GET | `/api/lab/catalog` | The 16 attacks |
 | POST | `/api/lab/run` | `{"attacks": [{"id": "edit", "params": {"txn": "TX-000100"}}]}` → full snapshot: verdicts, graph, reports, manifests, audit log |
+| GET | `/api/lab/run?attacks=edit,trust-root` | The same, with default parameters (shareable) |
 | GET | `/api/lab/data/{product}` | Pristine data |
 | POST | `/api/lab/verify-copy/{product}` | Check an uploaded copy, with line-level diff |
 | GET | `/api/lab/policy?consumer=&purpose=` | Ask the policy engine |

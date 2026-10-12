@@ -280,6 +280,7 @@
       ]);
       if (!specs.length) state.baseline = snap;
       show(snap, true);
+      shareLink(specs);
     } catch (err) {
       toast(err.message);
       $('#verdict-title').textContent = 'The lab could not run. Try again in a moment.';
@@ -288,6 +289,23 @@
       $('#run-btn').classList.remove('running');
       $('#scan').classList.remove('on');
       syncBench();
+    }
+  }
+
+  /** Keep the address bar pointing at this run so it can be shared. */
+  function shareLink(specs) {
+    const url = new URL(window.location.href);
+    if (specs.length) url.searchParams.set('run', specs.map((s) => s.id).join(','));
+    else url.searchParams.delete('run');
+    try { history.replaceState(null, '', url); } catch (e) { /* sandboxed frames */ }
+  }
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast('Link to this run copied.');
+    } catch (e) {
+      toast(window.location.href);
     }
   }
 
@@ -339,6 +357,9 @@
       el('span', { class: `pill ${snap.event_log.ok ? 'good' : 'bad'}` }, snap.event_log.ok ? `audit log intact, ${snap.event_log.entries} entries` : 'audit log broken'),
       el('span', { class: `pill ${snap.trust.ok ? 'good' : 'bad'}` }, snap.trust.ok ? 'trust anchor matches' : 'trust anchor mismatch'),
     );
+    if (snap.applied.length) {
+      pills.append(el('button', { type: 'button', class: 'pill share', onclick: copyLink }, 'Copy link to this run'));
+    }
     const old = $('.verdict-sub', bar);
     if (old) old.remove();
     title.after(sub);
@@ -908,6 +929,7 @@
     $('#reset-btn').addEventListener('click', () => {
       state.picked.clear();
       syncBench();
+      shareLink([]);
       if (state.baseline) show(state.baseline, true); else run([]);
     });
     document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => {
@@ -932,7 +954,15 @@
     } catch (err) {
       toast(err.message);
     }
-    await run([]);
+    const known = new Set(state.catalog.map((a) => a.id));
+    const linked = (new URLSearchParams(window.location.search).get('run') || '')
+      .split(',').map((s) => s.trim()).filter((id) => known.has(id)).slice(0, 8);
+    if (linked.length) {
+      state.picked = new Map(linked.map((id) => [id, true]));
+      syncBench();
+      if (!window.location.hash) $('#lab').scrollIntoView();
+    }
+    await run(attackSpecs());
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
